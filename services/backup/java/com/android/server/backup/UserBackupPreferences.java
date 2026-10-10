@@ -36,7 +36,11 @@ public class UserBackupPreferences {
 
     UserBackupPreferences(Context conext, File storageDir) {
         File excludedKeysFile = new File(storageDir, PREFERENCES_FILE);
-        mPreferences = conext.getSharedPreferences(excludedKeysFile, Context.MODE_PRIVATE);
+        // The system context counts as credential-protected storage of user 0, so opening a
+        // file of another user through it throws while user 0 is locked. The path is absolute,
+        // the device-protected context only skips that check.
+        mPreferences = conext.createDeviceProtectedStorageContext()
+                .getSharedPreferences(excludedKeysFile, Context.MODE_PRIVATE);
         mEditor = mPreferences.edit();
     }
 
