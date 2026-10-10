@@ -83,6 +83,10 @@ class LockSettingsShellCommand extends ShellCommand {
             return handleSetDuressCredentials();
         }
 
+        if (cmd.equals("set-reboot-credential")) {
+            return handleSetRebootCredential();
+        }
+
         if (cmd.equals("check-non-ce-storage-keys")) {
             return handleCheckNonCeStorageKeys();
         }
@@ -229,6 +233,12 @@ class LockSettingsShellCommand extends ShellCommand {
             pw.println("    delete all eSIMs.");
             pw.println("");
             pw.println("    If there's no owner credential, pass empty string to --owner-credential.");
+            pw.println("");
+            pw.println("  set-reboot-credential --owner-credential <CREDENTIAL>");
+            pw.println("      [--owner-second-factor <PIN>] --reboot-pin <PIN> | --reboot-password <PASSWORD>");
+            pw.println("");
+            pw.println("    Submitting the reboot credential instead of a regular credential reboots");
+            pw.println("    the device. An empty value deletes it.");
             pw.println("");
         }
     }
@@ -480,6 +490,78 @@ class LockSettingsShellCommand extends ShellCommand {
 
         mLockPatternUtils.setDuressCredentials(getOldCredential(), pin, password);
         DuressWipe.sleep5sBeforePoweroff = sleep5sBeforePoweroff;
+        return 0;
+    }
+
+    private int handleSetRebootCredential() {
+        String ownerCredential = null;
+        LockscreenCredential secondFactor = LockscreenCredential.createNone();
+        LockscreenCredential credential = null;
+
+        for (;;) {
+            String opt = getNextOption();
+            if (opt == null) {
+                break;
+            }
+
+            switch (opt) {
+                case "--owner-credential":
+                    ownerCredential = getNextArgRequired();
+                    break;
+                case "--owner-second-factor":
+                    secondFactor = LockscreenCredential.createPin(getNextArgRequired());
+                    break;
+                case "--reboot-pin":
+                case "--reboot-password":
+                    if (credential != null) {
+                        getErrPrintWriter().println("only one of --reboot-pin, --reboot-password");
+                        return -1;
+                    }
+                    String str = getNextArgRequired();
+                    if (str.isEmpty()) {
+                        credential = LockscreenCredential.createNone();
+                    } else if (opt.equals("--reboot-pin")) {
+                        credential = LockscreenCredential.createPin(str);
+                    } else {
+                        credential = LockscreenCredential.createPassword(str);
+                    }
+                    break;
+                default:
+                    getErrPrintWriter().println("unknown option " + opt);
+                    return -1;
+            }
+        }
+
+        if (getRemainingArgsCount() != 0) {
+            getErrPrintWriter().println("unknown arg: " + getNextArg());
+            return -1;
+        }
+        if (ownerCredential == null) {
+            getErrPrintWriter().println("missing --owner-credential value");
+            return -1;
+        }
+        if (credential == null) {
+            getErrPrintWriter().println("missing --reboot-pin or --reboot-password value");
+            return -1;
+        }
+
+        mCurrentUserId = UserHandle.USER_SYSTEM;
+        mOld = ownerCredential;
+        if (!checkCredential()) {
+            return -1;
+        }
+
+        // the credentials are zeroized by the call
+        boolean delete = credential.isNone();
+        try {
+            mLockPatternUtils.setRebootCredential(getOldCredential(), secondFactor, credential);
+        } catch (ParcelableException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            getErrPrintWriter().println("error: " + cause.getMessage());
+            return -1;
+        }
+        getOutPrintWriter().println(delete ? "Reboot credential deleted"
+                : "Reboot credential set");
         return 0;
     }
 

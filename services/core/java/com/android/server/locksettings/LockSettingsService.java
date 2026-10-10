@@ -4509,6 +4509,29 @@ public class LockSettingsService extends ILockSettings.Stub {
         return duressPasswordHelper.hasDuressCredentials(ownerCredential);
     }
 
+    @Override
+    public void setRebootCredential(LockscreenCredential ownerCredential,
+            LockscreenCredential ownerSecondFactor, LockscreenCredential rebootCredential) {
+        checkWritePermission();
+
+        try {
+            duressPasswordHelper.setRebootCredential(ownerCredential, ownerSecondFactor,
+                    rebootCredential);
+        } catch (Throwable e) {
+            throw new ParcelableException(e);
+        } finally {
+            ownerCredential.zeroize();
+            ownerSecondFactor.zeroize();
+            rebootCredential.zeroize();
+        }
+    }
+
+    @Override
+    public boolean hasRebootCredential(LockscreenCredential ownerCredential) {
+        checkHavePermission();
+        return duressPasswordHelper.hasRebootCredential(ownerCredential);
+    }
+
     Context getContext() {
         return mContext;
     }

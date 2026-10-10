@@ -2261,4 +2261,32 @@ public class LockPatternUtils {
             throw e.rethrowFromSystemServer();
         }
     }
+
+    public void setRebootCredential(@NonNull LockscreenCredential ownerCredential,
+                                    @NonNull LockscreenCredential ownerSecondFactor,
+                                    @NonNull LockscreenCredential rebootCredential) {
+        try {
+            getLockSettings().setRebootCredential(ownerCredential, ownerSecondFactor,
+                    rebootCredential);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
+    public void deleteRebootCredential(@NonNull LockscreenCredential ownerCredential) {
+        var noCredential = LockscreenCredential.createNone();
+        try {
+            getLockSettings().setRebootCredential(ownerCredential, noCredential, noCredential);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
+    public boolean hasRebootCredential(@NonNull LockscreenCredential ownerCredential) {
+        try {
+            return getLockSettings().hasRebootCredential(ownerCredential);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
 }
