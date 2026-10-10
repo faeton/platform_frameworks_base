@@ -1455,6 +1455,10 @@ class AccountsDb implements AutoCloseable {
     @Override
     public void close() {
         mDeDatabase.close();
+        // CE database has its own connection, keep it from holding files of a stopped user open
+        if (mCeDatabase != null) {
+            mCeDatabase.close();
+        }
     }
 
     static void deleteDbFileWarnIfFailed(File dbFile) {
