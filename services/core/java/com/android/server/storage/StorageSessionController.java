@@ -274,10 +274,8 @@ public final class StorageSessionController {
         Slog.i(TAG, "On user unlock " + userId);
         // The first user to unlock does it, not only user 0: a secondary user can unlock while
         // user 0 stays locked, and each user binds its own ExternalStorageService.
-        synchronized (mLock) {
-            if (userId == 0 || mExternalStorageServiceComponent == null) {
-                initExternalStorageServiceComponent(userId);
-            }
+        if (userId == 0 || mExternalStorageServiceComponent == null) {
+            initExternalStorageServiceComponent(userId);
         }
     }
 
@@ -373,10 +371,10 @@ public final class StorageSessionController {
             throw new ExternalStorageServiceException("No valid MediaStore provider found");
         }
 
-        mExternalStorageServicePackageName = provider.applicationInfo.packageName;
-        mExternalStorageServiceAppId = UserHandle.getAppId(provider.getUid());
+        String packageName = provider.applicationInfo.packageName;
+        int appId = UserHandle.getAppId(provider.getUid());
 
-        ServiceInfo serviceInfo = resolveExternalStorageServiceAsUser(userId);
+        ServiceInfo serviceInfo = resolveExternalStorageServiceAsUser(packageName, userId);
         if (serviceInfo == null) {
             throw new ExternalStorageServiceException(
                     "No valid ExternalStorageService component found");
@@ -390,7 +388,15 @@ public final class StorageSessionController {
                     + Manifest.permission.BIND_EXTERNAL_STORAGE_SERVICE);
         }
 
-        mExternalStorageServiceComponent = name;
+        // resolved above without mLock, PackageManager calls don't belong under it; published
+        // together, the component last, since readers check it first
+        synchronized (mLock) {
+            if (userId == 0 || mExternalStorageServiceComponent == null) {
+                mExternalStorageServicePackageName = packageName;
+                mExternalStorageServiceAppId = appId;
+                mExternalStorageServiceComponent = name;
+            }
+        }
     }
 
     /** Returns the {@link ExternalStorageService} component name. */
@@ -504,8 +510,12 @@ public final class StorageSessionController {
     }
 
     private ServiceInfo resolveExternalStorageServiceAsUser(int userId) {
+        return resolveExternalStorageServiceAsUser(mExternalStorageServicePackageName, userId);
+    }
+
+    private ServiceInfo resolveExternalStorageServiceAsUser(String packageName, int userId) {
         Intent intent = new Intent(ExternalStorageService.SERVICE_INTERFACE);
-        intent.setPackage(mExternalStorageServicePackageName);
+        intent.setPackage(packageName);
         ResolveInfo resolveInfo = mContext.getPackageManager().resolveServiceAsUser(intent,
                 PackageManager.GET_SERVICES | PackageManager.GET_META_DATA, userId);
         if (resolveInfo == null) {
