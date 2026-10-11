@@ -33,6 +33,12 @@ public class DuressPasswordHelper {
     // collision checks of the alternate credentials and their writes
     private final Object alternatesLock = new Object();
 
+    // owner credential changes, an enrolment that overlaps one is refused
+    @GuardedBy("alternatesLock")
+    private int ownerCredentialChanges;
+
+    static final String OWNER_CREDENTIAL_CHANGED = "owner credential changed, try again";
+
     // successful verifications per user, a queued reboot is dropped when this changes
     @GuardedBy("verifiedCount")
     private final SparseIntArray verifiedCount = new SparseIntArray();
@@ -138,6 +144,20 @@ public class DuressPasswordHelper {
     }
 
     /**
+     * Called before a credential of {@code userId} is changed, so that an enrolment whose owner
+     * checks ran before the change is refused even if it saves before the change completes.
+     * May be called with the SyntheticPasswordManager lock held: only counts.
+     */
+    protected void onLockCredentialChanging(int userId) {
+        if (userId != UserHandle.USER_SYSTEM) {
+            return;
+        }
+        synchronized (alternatesLock) {
+            ownerCredentialChanges++;
+        }
+    }
+
+    /**
      * Called after a credential of {@code userId} has changed. The reboot credential is deleted
      * when the owner removes the screen lock or picks a credential equal to it: in both cases it
      * would no longer do what it was enrolled for.
@@ -148,28 +168,28 @@ public class DuressPasswordHelper {
             return;
         }
         synchronized (alternatesLock) {
-            DuressCredential rc;
+            ownerCredentialChanges++;
+            // the change is already committed: never fail it from here
             try {
-                rc = RebootCredential.maybeGet(lockSettingsStorage);
-            } catch (IllegalStateException e) {
-                Slog.e(TAG, e.getMessage());
-                return;
-            }
-            if (rc == null) {
-                return;
-            }
-            String reason = null;
-            if (newCredential.isNone()) {
-                if (lockDomain == Primary) {
-                    reason = "owner screen lock removed";
+                if (newCredential.isNone()) {
+                    // deleting doesn't parse, so a corrupt record goes as well. A cleared second
+                    // factor (also called with the SyntheticPasswordManager lock held) does
+                    // nothing here
+                    if (lockDomain == Primary && RebootCredential.exists(lockSettingsStorage)) {
+                        RebootCredential.delete(lockSettingsStorage);
+                        Slog.i(TAG, "deleted reboot credential, owner screen lock removed");
+                    }
+                    return;
                 }
-            } else if (rc.getType() == newCredential.getType()
-                    && rc.verify(spManager, newCredential)) {
-                reason = "equal to the new owner credential";
-            }
-            if (reason != null) {
-                RebootCredential.delete(lockSettingsStorage);
-                Slog.i(TAG, "deleted reboot credential, " + reason);
+                DuressCredential rc = RebootCredential.maybeGet(lockSettingsStorage);
+                if (rc != null && rc.getType() == newCredential.getType()
+                        && rc.verify(spManager, newCredential)) {
+                    RebootCredential.delete(lockSettingsStorage);
+                    Slog.i(TAG, "deleted reboot credential, equal to the new owner credential");
+                }
+            } catch (RuntimeException e) {
+                Slog.e(TAG, "reboot credential check after a change failed: "
+                        + e.getClass().getSimpleName());
             }
         }
     }
@@ -210,7 +230,14 @@ public class DuressPasswordHelper {
         DuressCredential.validate(password, CREDENTIAL_TYPE_PASSWORD);
 
         synchronized (alternatesLock) {
-            DuressCredential rc = RebootCredential.maybeGet(lockSettingsStorage);
+            DuressCredential rc;
+            try {
+                rc = RebootCredential.maybeGet(lockSettingsStorage);
+            } catch (IllegalStateException e) {
+                // an unreadable reboot record can't collide and mustn't block duress enrolment
+                Slog.e(TAG, e.getMessage());
+                rc = null;
+            }
             if (rc != null) {
                 LockscreenCredential sameType =
                         rc.getType() == CREDENTIAL_TYPE_PIN ? pin : password;
@@ -246,6 +273,11 @@ public class DuressPasswordHelper {
         Objects.requireNonNull(credential, "credential");
 
         int userId = UserHandle.USER_SYSTEM;
+        // sampled before the owner checks: a change after them would make the checks stale
+        int changesBefore;
+        synchronized (alternatesLock) {
+            changesBefore = ownerCredentialChanges;
+        }
         boolean hasSecondFactor =
                 lockSettingsService.getCredentialType(userId, Secondary) != CREDENTIAL_TYPE_NONE;
 
@@ -269,6 +301,9 @@ public class DuressPasswordHelper {
         }
 
         if (hasSecondFactor) {
+            if (ownerSecondFactor.isNone()) {
+                throw new SecurityException("owner second factor required");
+            }
             VerifyCredentialResponse response = lockSettingsService.checkCredential(
                     ownerSecondFactor, Secondary, userId, null);
             if (!response.isMatched()) {
@@ -289,9 +324,13 @@ public class DuressPasswordHelper {
         if (sameAsSecondFactor) {
             throw new IllegalArgumentException(COLLISION_SECOND_FACTOR);
         }
+        afterOwnerChecks();
         // the owner checks above verify through doVerifyCredential and may take the
         // SyntheticPasswordManager lock, so they stay outside alternatesLock
         synchronized (alternatesLock) {
+            if (ownerCredentialChanges != changesBefore) {
+                throw new IllegalStateException(OWNER_CREDENTIAL_CHANGED);
+            }
             DuressCredentials dc = DuressCredentials.maybeGet(lockSettingsStorage);
             if (dc != null && dc.get(type).verify(spManager, credential)) {
                 throw new IllegalArgumentException(COLLISION_DURESS);
@@ -300,6 +339,11 @@ public class DuressPasswordHelper {
             RebootCredential.save(lockSettingsStorage,
                     DuressCredential.create(credential, spManager));
         }
+    }
+
+    /** Between the owner checks of an enrolment and its save. Tests change the owner here. */
+    @VisibleForTesting
+    void afterOwnerChecks() {
     }
 
     protected boolean hasRebootCredential(LockscreenCredential ownerCredential) {

@@ -805,7 +805,7 @@ class RebootEscrowManager {
 
     void callToRebootEscrowIfNeeded(@UserIdInt int userId, byte spVersion,
             byte[] syntheticPassword) {
-        if (!mRebootEscrowWanted) {
+        if (!mRebootEscrowWanted || mClearedForReboot) {
             return;
         }
 
@@ -836,7 +836,13 @@ class RebootEscrowManager {
             return;
         }
 
-        mStorage.writeRebootEscrow(userId, escrowData.getBlob());
+        synchronized (mClearForRebootLock) {
+            // a capture that started before a BFU clear must not write after it
+            if (mClearedForReboot) {
+                return;
+            }
+            mStorage.writeRebootEscrow(userId, escrowData.getBlob());
+        }
         mEventLog.addEntry(RebootEscrowEvent.STORED_LSKF_FOR_USER, userId);
 
         setRebootEscrowReady(true);
@@ -887,6 +893,18 @@ class RebootEscrowManager {
     }
 
     @ArmRebootEscrowErrorCode int armRebootEscrowIfNeeded() {
+        // held for the whole arm, so a BFU clear waits for an arm in progress and then
+        // shreds what it stored
+        synchronized (mClearForRebootLock) {
+            if (mClearedForReboot) {
+                return ARM_REBOOT_ERROR_ESCROW_NOT_READY;
+            }
+            return armRebootEscrowIfNeededLocked();
+        }
+    }
+
+    @GuardedBy("mClearForRebootLock")
+    private @ArmRebootEscrowErrorCode int armRebootEscrowIfNeededLocked() {
         if (!mRebootEscrowReady) {
             return ARM_REBOOT_ERROR_ESCROW_NOT_READY;
         }
@@ -959,6 +977,10 @@ class RebootEscrowManager {
     }
 
     boolean prepareRebootEscrow() {
+        if (mClearedForReboot) {
+            Slog.w(TAG, "A reboot that has to end with every user locked is in progress");
+            return false;
+        }
         clearRebootEscrowIfNeeded();
         if (mInjector.createRebootEscrowProviderIfNeeded() == null) {
             Slog.w(TAG, "No reboot escrow provider, skipping resume on reboot preparation.");
@@ -973,6 +995,37 @@ class RebootEscrowManager {
     boolean clearRebootEscrow() {
         clearRebootEscrowIfNeeded();
         return true;
+    }
+
+    // Set once a reboot that has to end with every user locked has started. Never reset: if
+    // that reboot doesn't happen, resume on reboot stays off until the next boot, which is the
+    // safe side (a delayed reboot could otherwise still restore the users).
+    private volatile boolean mClearedForReboot;
+    private final Object mClearForRebootLock = new Object();
+
+    /**
+     * Clears the escrow for a reboot that must end with every user locked, and keeps it from
+     * being captured or armed again before the reboot. The users' escrow blobs are deleted
+     * first and once more at the end, so that neither a failing provider nor a capture that was
+     * already running leaves anything to restore.
+     */
+    void clearRebootEscrowForReboot() {
+        synchronized (mClearForRebootLock) {
+            mClearedForReboot = true;
+            removeUsersRebootEscrow();
+            try {
+                clearRebootEscrowIfNeeded();
+            } catch (RuntimeException e) {
+                Slog.e(TAG, "clearing the reboot escrow provider failed", e);
+            }
+            removeUsersRebootEscrow();
+        }
+    }
+
+    private void removeUsersRebootEscrow() {
+        for (UserInfo user : mUserManager.getUsers()) {
+            mStorage.removeRebootEscrow(user.id);
+        }
     }
 
     void setRebootEscrowListener(RebootEscrowListener listener) {

@@ -20,6 +20,11 @@ public class RebootBfu {
         // No key destruction: a reboot drops all CE keys from memory and the next boot asks
         // for the credential again. init still kills processes, syncs and unmounts. The reason
         // is the one the power menu passes, so the boot reason matches a user restart.
-        PowerManagerService.lowLevelReboot(PowerManager.SHUTDOWN_USER_REQUESTED);
+        // lowLevelReboot returns only if init didn't reboot within 20 s: ask again rather than
+        // leave the device running after first unlock
+        for (int attempt = 0; attempt < 3; attempt++) {
+            PowerManagerService.lowLevelReboot(PowerManager.SHUTDOWN_USER_REQUESTED);
+        }
+        Slog.wtf(TAG, "device did not reboot");
     }
 }

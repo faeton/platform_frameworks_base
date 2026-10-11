@@ -442,6 +442,10 @@ class LockSettingsShellCommand extends ShellCommand {
                         ownerCredential = getNextArgRequired();
                         break;
                     case "--duress-pin":
+                        if (pin != null) {
+                            getErrPrintWriter().println("--duress-pin given twice");
+                            return -1;
+                        }
                         String pinStr = getNextArgRequired();
                         if (pinStr.isEmpty()) {
                             pin = LockscreenCredential.createNone();
@@ -450,6 +454,10 @@ class LockSettingsShellCommand extends ShellCommand {
                         }
                         break;
                     case "--duress-password":
+                        if (password != null) {
+                            getErrPrintWriter().println("--duress-password given twice");
+                            return -1;
+                        }
                         String pwdStr = getNextArgRequired();
                         if (pwdStr.isEmpty()) {
                             password = LockscreenCredential.createNone();

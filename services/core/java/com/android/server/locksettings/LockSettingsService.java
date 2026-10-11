@@ -2271,6 +2271,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             boolean isLockTiedToParent) {
         Objects.requireNonNull(credential);
         Objects.requireNonNull(savedCredential);
+        duressPasswordHelper.onLockCredentialChanging(userId);
         if (lockDomain == Secondary && !(credential.getType() == CREDENTIAL_TYPE_PIN ||
                 credential.getType() == CREDENTIAL_TYPE_NONE)) {
             throw new IllegalArgumentException(
@@ -3962,6 +3963,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     @GuardedBy("mSpManager")
     private boolean setLockCredentialWithTokenInternalLocked(LockscreenCredential credential,
             long tokenHandle, byte[] token, int userId) {
+        duressPasswordHelper.onLockCredentialChanging(userId);
         Slogf.i(TAG, "Resetting lockscreen credential of user %d using escrow token %016x",
                 userId, tokenHandle);
         final AuthenticationResult result;
@@ -4486,16 +4488,19 @@ public class LockSettingsService extends ILockSettings.Stub {
         }
     }
 
-    private final DuressPasswordHelper duressPasswordHelper;
+    @VisibleForTesting
+    final DuressPasswordHelper duressPasswordHelper;
 
     @Override
     public void setDuressCredentials(LockscreenCredential ownerCredential,
             LockscreenCredential pin, LockscreenCredential password) {
         try {
             checkWritePermission();
-            duressPasswordHelper.setDuressCredentials(ownerCredential, pin, password);
-        } catch (Throwable e) {
-            throw new ParcelableException(e);
+            try {
+                duressPasswordHelper.setDuressCredentials(ownerCredential, pin, password);
+            } catch (Throwable e) {
+                throw new ParcelableException(e);
+            }
         } finally {
             zeroizeAll(ownerCredential, pin, password);
         }
@@ -4516,10 +4521,12 @@ public class LockSettingsService extends ILockSettings.Stub {
             LockscreenCredential ownerSecondFactor, LockscreenCredential rebootCredential) {
         try {
             checkWritePermission();
-            duressPasswordHelper.setRebootCredential(ownerCredential, ownerSecondFactor,
-                    rebootCredential);
-        } catch (Throwable e) {
-            throw new ParcelableException(e);
+            try {
+                duressPasswordHelper.setRebootCredential(ownerCredential, ownerSecondFactor,
+                        rebootCredential);
+            } catch (Throwable e) {
+                throw new ParcelableException(e);
+            }
         } finally {
             zeroizeAll(ownerCredential, ownerSecondFactor, rebootCredential);
         }
@@ -4546,7 +4553,7 @@ public class LockSettingsService extends ILockSettings.Stub {
 
     /** Clears an armed reboot escrow, so that a reboot ends with every user locked. */
     void clearRebootEscrowForBfu() {
-        mRebootEscrowManager.clearRebootEscrow();
+        mRebootEscrowManager.clearRebootEscrowForReboot();
     }
 
     Context getContext() {
