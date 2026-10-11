@@ -2363,6 +2363,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             }
         }
         updatePasswordHistory(newCredential, userId, lockDomain);
+        duressPasswordHelper.onLockCredentialChanged(newCredential, lockDomain, userId);
         if (lockDomain == Primary) {
             mContext.getSystemService(TrustManager.class).reportEnabledTrustAgentsChanged(
                     userId);
@@ -2774,7 +2775,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             res = doVerifyCredentialInner(credential, lockDomain, userId, progressCallback, flags);
             return res;
         } finally {
-            duressPasswordHelper.onVerifyCredentialResult(res, credential);
+            duressPasswordHelper.onVerifyCredentialResult(res, credential, userId);
         }
     }
 
@@ -4490,46 +4491,62 @@ public class LockSettingsService extends ILockSettings.Stub {
     @Override
     public void setDuressCredentials(LockscreenCredential ownerCredential,
             LockscreenCredential pin, LockscreenCredential password) {
-        checkWritePermission();
-
         try {
+            checkWritePermission();
             duressPasswordHelper.setDuressCredentials(ownerCredential, pin, password);
         } catch (Throwable e) {
             throw new ParcelableException(e);
         } finally {
-            ownerCredential.zeroize();
-            pin.zeroize();
-            password.zeroize();
+            zeroizeAll(ownerCredential, pin, password);
         }
     }
 
     @Override
     public boolean hasDuressCredentials(LockscreenCredential ownerCredential) {
-        checkHavePermission();
-        return duressPasswordHelper.hasDuressCredentials(ownerCredential);
+        try {
+            checkHavePermission();
+            return duressPasswordHelper.hasDuressCredentials(ownerCredential);
+        } finally {
+            zeroizeAll(ownerCredential);
+        }
     }
 
     @Override
     public void setRebootCredential(LockscreenCredential ownerCredential,
             LockscreenCredential ownerSecondFactor, LockscreenCredential rebootCredential) {
-        checkWritePermission();
-
         try {
+            checkWritePermission();
             duressPasswordHelper.setRebootCredential(ownerCredential, ownerSecondFactor,
                     rebootCredential);
         } catch (Throwable e) {
             throw new ParcelableException(e);
         } finally {
-            ownerCredential.zeroize();
-            ownerSecondFactor.zeroize();
-            rebootCredential.zeroize();
+            zeroizeAll(ownerCredential, ownerSecondFactor, rebootCredential);
         }
     }
 
     @Override
     public boolean hasRebootCredential(LockscreenCredential ownerCredential) {
-        checkHavePermission();
-        return duressPasswordHelper.hasRebootCredential(ownerCredential);
+        try {
+            checkHavePermission();
+            return duressPasswordHelper.hasRebootCredential(ownerCredential);
+        } finally {
+            zeroizeAll(ownerCredential);
+        }
+    }
+
+    // credentials of the alternate credential calls, any of them may be null
+    private static void zeroizeAll(LockscreenCredential... credentials) {
+        for (LockscreenCredential credential : credentials) {
+            if (credential != null) {
+                credential.zeroize();
+            }
+        }
+    }
+
+    /** Clears an armed reboot escrow, so that a reboot ends with every user locked. */
+    void clearRebootEscrowForBfu() {
+        mRebootEscrowManager.clearRebootEscrow();
     }
 
     Context getContext() {

@@ -430,67 +430,77 @@ class LockSettingsShellCommand extends ShellCommand {
         LockscreenCredential password = null;
         boolean sleep5sBeforePoweroff = false;
 
-        for (;;) {
-            String opt = getNextOption();
-            if (opt == null) {
-                break;
+        try {
+            for (;;) {
+                String opt = getNextOption();
+                if (opt == null) {
+                    break;
+                }
+
+                switch (opt) {
+                    case "--owner-credential":
+                        ownerCredential = getNextArgRequired();
+                        break;
+                    case "--duress-pin":
+                        String pinStr = getNextArgRequired();
+                        if (pinStr.isEmpty()) {
+                            pin = LockscreenCredential.createNone();
+                        } else {
+                            pin = LockscreenCredential.createPin(pinStr);
+                        }
+                        break;
+                    case "--duress-password":
+                        String pwdStr = getNextArgRequired();
+                        if (pwdStr.isEmpty()) {
+                            password = LockscreenCredential.createNone();
+                        } else {
+                            password = LockscreenCredential.createPassword(pwdStr);
+                        }
+                        break;
+                    case "--sleep-5s-before-poweroff":
+                        sleep5sBeforePoweroff = true;
+                        break;
+                    default:
+                        getErrPrintWriter().println("unknown option " + opt);
+                        return -1;
+                }
             }
 
-            switch (opt) {
-                case "--owner-credential":
-                    ownerCredential = getNextArgRequired();
-                    break;
-                case "--duress-pin":
-                    String pinStr = getNextArgRequired();
-                    if (pinStr.isEmpty()) {
-                        pin = LockscreenCredential.createNone();
-                    } else {
-                        pin = LockscreenCredential.createPin(pinStr);
-                    }
-                    break;
-                case "--duress-password":
-                    String pwdStr = getNextArgRequired();
-                    if (pwdStr.isEmpty()) {
-                        password = LockscreenCredential.createNone();
-                    } else {
-                        password = LockscreenCredential.createPassword(pwdStr);
-                    }
-                    break;
-                case "--sleep-5s-before-poweroff":
-                    sleep5sBeforePoweroff = true;
-                    break;
-                default:
-                    getErrPrintWriter().println("unknown option " + opt);
-                    return -1;
+            if (getRemainingArgsCount() != 0) {
+                getErrPrintWriter().println("unknown arg: " + getNextArg());
+                return -1;
+            }
+            if (ownerCredential == null) {
+                getErrPrintWriter().println("missing --owner-credential value");
+                return -1;
+            }
+            if (pin == null) {
+                getErrPrintWriter().println("missing --duress-pin value");
+                return -1;
+            }
+            if (password == null) {
+                getErrPrintWriter().println("missing --duress-password value");
+                return -1;
+            }
+
+            mCurrentUserId = UserHandle.USER_SYSTEM;
+            mOld = ownerCredential;
+            if (!checkCredential()) {
+                return -1;
+            }
+
+            mLockPatternUtils.setDuressCredentials(getOldCredential(), pin, password);
+            DuressWipe.sleep5sBeforePoweroff = sleep5sBeforePoweroff;
+            return 0;
+        } finally {
+            // also on the early returns
+            if (pin != null) {
+                pin.zeroize();
+            }
+            if (password != null) {
+                password.zeroize();
             }
         }
-
-        if (getRemainingArgsCount() != 0) {
-            getErrPrintWriter().println("unknown arg: " + getNextArg());
-            return -1;
-        }
-        if (ownerCredential == null) {
-            getErrPrintWriter().println("missing --owner-credential value");
-            return -1;
-        }
-        if (pin == null) {
-            getErrPrintWriter().println("missing --duress-pin value");
-            return -1;
-        }
-        if (password == null) {
-            getErrPrintWriter().println("missing --duress-password value");
-            return -1;
-        }
-
-        mCurrentUserId = UserHandle.USER_SYSTEM;
-        mOld = ownerCredential;
-        if (!checkCredential()) {
-            return -1;
-        }
-
-        mLockPatternUtils.setDuressCredentials(getOldCredential(), pin, password);
-        DuressWipe.sleep5sBeforePoweroff = sleep5sBeforePoweroff;
-        return 0;
     }
 
     private int handleSetRebootCredential() {
@@ -498,71 +508,86 @@ class LockSettingsShellCommand extends ShellCommand {
         LockscreenCredential secondFactor = LockscreenCredential.createNone();
         LockscreenCredential credential = null;
 
-        for (;;) {
-            String opt = getNextOption();
-            if (opt == null) {
-                break;
-            }
-
-            switch (opt) {
-                case "--owner-credential":
-                    ownerCredential = getNextArgRequired();
-                    break;
-                case "--owner-second-factor":
-                    secondFactor = LockscreenCredential.createPin(getNextArgRequired());
-                    break;
-                case "--reboot-pin":
-                case "--reboot-password":
-                    if (credential != null) {
-                        getErrPrintWriter().println("only one of --reboot-pin, --reboot-password");
-                        return -1;
-                    }
-                    String str = getNextArgRequired();
-                    if (str.isEmpty()) {
-                        credential = LockscreenCredential.createNone();
-                    } else if (opt.equals("--reboot-pin")) {
-                        credential = LockscreenCredential.createPin(str);
-                    } else {
-                        credential = LockscreenCredential.createPassword(str);
-                    }
-                    break;
-                default:
-                    getErrPrintWriter().println("unknown option " + opt);
-                    return -1;
-            }
-        }
-
-        if (getRemainingArgsCount() != 0) {
-            getErrPrintWriter().println("unknown arg: " + getNextArg());
-            return -1;
-        }
-        if (ownerCredential == null) {
-            getErrPrintWriter().println("missing --owner-credential value");
-            return -1;
-        }
-        if (credential == null) {
-            getErrPrintWriter().println("missing --reboot-pin or --reboot-password value");
-            return -1;
-        }
-
-        mCurrentUserId = UserHandle.USER_SYSTEM;
-        mOld = ownerCredential;
-        if (!checkCredential()) {
-            return -1;
-        }
-
-        // the credentials are zeroized by the call
-        boolean delete = credential.isNone();
         try {
-            mLockPatternUtils.setRebootCredential(getOldCredential(), secondFactor, credential);
-        } catch (ParcelableException e) {
-            Throwable cause = e.getCause() != null ? e.getCause() : e;
-            getErrPrintWriter().println("error: " + cause.getMessage());
-            return -1;
+            for (;;) {
+                String opt = getNextOption();
+                if (opt == null) {
+                    break;
+                }
+
+                switch (opt) {
+                    case "--owner-credential":
+                        ownerCredential = getNextArgRequired();
+                        break;
+                    case "--owner-second-factor":
+                        if (!secondFactor.isNone()) {
+                            getErrPrintWriter().println("--owner-second-factor given twice");
+                            return -1;
+                        }
+                        secondFactor = LockscreenCredential.createPin(getNextArgRequired());
+                        break;
+                    case "--reboot-pin":
+                    case "--reboot-password":
+                        if (credential != null) {
+                            getErrPrintWriter().println(
+                                    "only one of --reboot-pin, --reboot-password");
+                            return -1;
+                        }
+                        String str = getNextArgRequired();
+                        if (str.isEmpty()) {
+                            credential = LockscreenCredential.createNone();
+                        } else if (opt.equals("--reboot-pin")) {
+                            credential = LockscreenCredential.createPin(str);
+                        } else {
+                            credential = LockscreenCredential.createPassword(str);
+                        }
+                        break;
+                    default:
+                        getErrPrintWriter().println("unknown option " + opt);
+                        return -1;
+                }
+            }
+
+            if (getRemainingArgsCount() != 0) {
+                getErrPrintWriter().println("unknown arg: " + getNextArg());
+                return -1;
+            }
+            if (ownerCredential == null) {
+                getErrPrintWriter().println("missing --owner-credential value");
+                return -1;
+            }
+            if (credential == null) {
+                getErrPrintWriter().println("missing --reboot-pin or --reboot-password value");
+                return -1;
+            }
+
+            mCurrentUserId = UserHandle.USER_SYSTEM;
+            mOld = ownerCredential;
+            if (!checkCredential()) {
+                return -1;
+            }
+
+            // the call zeroizes the credentials, read what's needed first
+            boolean delete = credential.isNone();
+            try {
+                mLockPatternUtils.setRebootCredential(getOldCredential(), secondFactor, credential);
+            } catch (ParcelableException e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                getErrPrintWriter().println("error: " + cause.getMessage());
+                return -1;
+            }
+            getOutPrintWriter().println(delete ? "Reboot credential deleted"
+                    : "Reboot credential set");
+            return 0;
+        } finally {
+            // also on the early returns
+            if (secondFactor != null) {
+                secondFactor.zeroize();
+            }
+            if (credential != null) {
+                credential.zeroize();
+            }
         }
-        getOutPrintWriter().println(delete ? "Reboot credential deleted"
-                : "Reboot credential set");
-        return 0;
     }
 
     private int handleCheckNonCeStorageKeys() {

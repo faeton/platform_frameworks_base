@@ -1,5 +1,6 @@
 package com.android.server.locksettings;
 
+import android.os.PowerManager;
 import android.util.Slog;
 
 import com.android.server.power.PowerManagerService;
@@ -7,11 +8,18 @@ import com.android.server.power.PowerManagerService;
 public class RebootBfu {
     static final String TAG = RebootBfu.class.getSimpleName();
 
-    static void run() {
+    static void run(LockSettingsService lockSettingsService) {
         Slog.d(TAG, "start");
+        // A reboot escrow armed for a pending update would unlock the users again on the next
+        // boot. Clear it first, a failure here must not stop the reboot.
+        try {
+            lockSettingsService.clearRebootEscrowForBfu();
+        } catch (RuntimeException e) {
+            Slog.e(TAG, "clearing reboot escrow failed", e);
+        }
         // No key destruction: a reboot drops all CE keys from memory and the next boot asks
-        // for the credential again. init still kills processes, syncs and unmounts. No reason
-        // string, so the boot reason looks like any other reboot.
-        PowerManagerService.lowLevelReboot(null);
+        // for the credential again. init still kills processes, syncs and unmounts. The reason
+        // is the one the power menu passes, so the boot reason matches a user restart.
+        PowerManagerService.lowLevelReboot(PowerManager.SHUTDOWN_USER_REQUESTED);
     }
 }
