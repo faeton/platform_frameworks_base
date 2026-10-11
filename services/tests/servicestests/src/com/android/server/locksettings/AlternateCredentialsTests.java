@@ -2,11 +2,17 @@ package com.android.server.locksettings;
 
 import static com.android.internal.widget.LockDomain.Primary;
 import static com.android.internal.widget.LockDomain.Secondary;
+import static com.android.internal.widget.LockPatternUtils.CREDENTIAL_TYPE_NONE;
 
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
 
 import android.platform.test.annotations.Presubmit;
 
@@ -270,5 +276,118 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         assertThat(mWipes).isEqualTo(1);
         mHelper.setRebootCredential(newPin(OWNER), nonePassword(), nonePassword());
         assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isFalse();
+    }
+
+    @Test
+    public void corruptRebootRecord_doesNotBlockDuressOrLockRemoval() {
+        mStorage.setString("reboot_credential", "ff", PRIMARY_USER_ID);
+
+        setDuress(DURESS_PIN, DURESS_PASSWORD);
+        enter(newPin(DURESS_PIN), PRIMARY_USER_ID);
+        assertThat(mWipes).isEqualTo(1);
+
+        // an owner change never fails because of it, and removing the lock deletes it
+        mHelper.onLockCredentialChanged(newPin("4321"), Primary, PRIMARY_USER_ID);
+        mHelper.onLockCredentialChanged(nonePassword(), Primary, PRIMARY_USER_ID);
+        assertThat(mStorage.getString("reboot_credential", null, PRIMARY_USER_ID)).isNull();
+    }
+
+    @Test
+    public void damagedValidRecord_rejectedWithoutAllocating() {
+        setReboot(REBOOT);
+        String valid = mStorage.getString("reboot_credential", null, PRIMARY_USER_ID);
+        // version (1 byte), PasswordData length (4), PasswordData: type (4), 3 exponents,
+        // salt length (4) ..., then hash length (4) and the hash
+        String[] damaged = {
+                valid.substring(0, valid.length() - 2),                     // hash cut short
+                valid + "00",                                               // trailing byte
+                valid.substring(0, 2) + "00000024" + valid.substring(10),   // padded PasswordData
+                valid.substring(0, 64) + "00000001" + valid.substring(72),  // a password handle
+                valid.substring(0, 2) + "7fffffff" + valid.substring(10),   // huge outer length
+                valid.substring(0, 18) + "ff" + valid.substring(20),        // scrypt exponent
+                valid.substring(0, 24) + "7fffffff" + valid.substring(32),  // huge salt length
+        };
+        for (String record : damaged) {
+            mStorage.setString("reboot_credential", record, PRIMARY_USER_ID);
+            var e = assertThrows(IllegalStateException.class,
+                    () -> mHelper.hasRebootCredential(newPin(OWNER)));
+            assertThat(e).hasMessageThat().isEqualTo("corrupt reboot credential record");
+            enter(newPin(REBOOT), PRIMARY_USER_ID);
+        }
+        assertThat(mReboots).isEqualTo(0);
+
+        mStorage.setString("reboot_credential", valid, PRIMARY_USER_ID);
+        enter(newPin(REBOOT), PRIMARY_USER_ID);
+        assertThat(mReboots).isEqualTo(1);
+    }
+
+    @Test
+    public void secondFactor_requiredAndCompared() {
+        final String secondFactor = "246810";
+        assertTrue(mService.setLockCredential(newPin(secondFactor), newPin(OWNER), Secondary,
+                PRIMARY_USER_ID));
+
+        // missing or wrong second factor
+        assertThrows(SecurityException.class, () -> setReboot(REBOOT));
+        assertThrows(SecurityException.class, () -> mHelper.setRebootCredential(newPin(OWNER),
+                newPin("135790"), newPin(REBOOT)));
+        assertCollision(DuressPasswordHelper.COLLISION_SECOND_FACTOR,
+                () -> mHelper.setRebootCredential(newPin(OWNER), newPin(secondFactor),
+                        newPin(secondFactor)));
+
+        mHelper.setRebootCredential(newPin(OWNER), newPin(secondFactor), newPin(REBOOT));
+        enter(newPin(REBOOT), PRIMARY_USER_ID);
+        assertThat(mReboots).isEqualTo(1);
+    }
+
+    @Test
+    public void enrolment_refusedWhenOwnerCredentialChangesMeanwhile() {
+        mHelper = new DuressPasswordHelper(mService, mStorage, mSpManager,
+                new DuressPasswordHelper.Actions() {
+                    @Override
+                    public void wipe() {
+                    }
+
+                    @Override
+                    public void reboot() {
+                    }
+                }) {
+            @Override
+            void afterOwnerChecks() {
+                // an owner change starts after the checks and hasn't finished at the save
+                onLockCredentialChanging(PRIMARY_USER_ID);
+            }
+        };
+
+        var e = assertThrows(IllegalStateException.class, () -> setReboot(REBOOT));
+        assertThat(e).hasMessageThat().isEqualTo(DuressPasswordHelper.OWNER_CREDENTIAL_CHANGED);
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isFalse();
+    }
+
+    @Test
+    public void wiring_credentialChangesReachTheHelper() {
+        DuressPasswordHelper mock = mService.duressPasswordHelper;
+        reset(mock);
+
+        assertTrue(mService.setLockCredential(newPin("4321"), newPin(OWNER), PRIMARY_USER_ID));
+        verify(mock).onLockCredentialChanging(PRIMARY_USER_ID);
+        verify(mock).onLockCredentialChanged(any(), eq(Primary), eq(PRIMARY_USER_ID));
+
+        assertTrue(mService.setLockCredential(nonePassword(), newPin("4321"), PRIMARY_USER_ID));
+        verify(mock).onLockCredentialChanged(argThat(c -> c.getType() == CREDENTIAL_TYPE_NONE),
+                eq(Primary), eq(PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void wiring_verificationsReachTheHelper() {
+        DuressPasswordHelper mock = mService.duressPasswordHelper;
+        reset(mock);
+
+        mService.verifyCredential(newPin("0000"), PRIMARY_USER_ID, 0);
+        verify(mock).onVerifyCredentialResult(argThat(r -> !r.isMatched()), any(),
+                eq(PRIMARY_USER_ID));
+        mService.verifyCredential(newPin(OWNER), PRIMARY_USER_ID, 0);
+        verify(mock).onVerifyCredentialResult(argThat(r -> r.isMatched()), any(),
+                eq(PRIMARY_USER_ID));
     }
 }

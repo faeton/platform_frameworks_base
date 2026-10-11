@@ -438,6 +438,27 @@ public class RebootEscrowManagerTests {
     }
 
     @Test
+    public void clearRebootEscrowForReboot_leavesNothingEvenIfProviderThrows() throws Exception {
+        mService.setRebootEscrowListener(mock(RebootEscrowListener.class));
+        mService.prepareRebootEscrow();
+        callToRebootEscrowIfNeededAndWait(PRIMARY_USER_ID);
+        assertEquals(ARM_REBOOT_ERROR_NONE, mService.armRebootEscrowIfNeeded());
+        assertTrue(mStorage.hasRebootEscrow(PRIMARY_USER_ID));
+
+        // the HAL's shred call fails with something the provider doesn't catch
+        doThrow(new IllegalStateException("provider")).when(mRebootEscrow).storeKey(any());
+        mService.clearRebootEscrowForReboot();
+        assertFalse(mStorage.hasRebootEscrow(PRIMARY_USER_ID));
+
+        // and nothing is prepared, captured or armed again before the reboot
+        doNothing().when(mRebootEscrow).storeKey(any());
+        assertFalse(mService.prepareRebootEscrow());
+        callToRebootEscrowIfNeededAndWait(PRIMARY_USER_ID);
+        assertFalse(mStorage.hasRebootEscrow(PRIMARY_USER_ID));
+        assertTrue(mService.armRebootEscrowIfNeeded() != ARM_REBOOT_ERROR_NONE);
+    }
+
+    @Test
     public void armService_Success() throws Exception {
         RebootEscrowListener mockListener = mock(RebootEscrowListener.class);
         mService.setRebootEscrowListener(mockListener);
