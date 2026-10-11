@@ -272,8 +272,12 @@ public final class StorageSessionController {
      */
     public void onUnlockUser(int userId) throws ExternalStorageServiceException {
         Slog.i(TAG, "On user unlock " + userId);
-        if (userId == 0) {
-            initExternalStorageServiceComponent();
+        // The first user to unlock does it, not only user 0: a secondary user can unlock while
+        // user 0 stays locked, and each user binds its own ExternalStorageService.
+        synchronized (mLock) {
+            if (userId == 0 || mExternalStorageServiceComponent == null) {
+                initExternalStorageServiceComponent(userId);
+            }
         }
     }
 
@@ -358,7 +362,8 @@ public final class StorageSessionController {
         }
     }
 
-    private void initExternalStorageServiceComponent() throws ExternalStorageServiceException {
+    private void initExternalStorageServiceComponent(int userId)
+            throws ExternalStorageServiceException {
         Slog.i(TAG, "Initialialising...");
         ProviderInfo provider = mContext.getPackageManager().resolveContentProvider(
                 MediaStore.AUTHORITY, PackageManager.MATCH_DIRECT_BOOT_AWARE
@@ -371,7 +376,7 @@ public final class StorageSessionController {
         mExternalStorageServicePackageName = provider.applicationInfo.packageName;
         mExternalStorageServiceAppId = UserHandle.getAppId(provider.getUid());
 
-        ServiceInfo serviceInfo = resolveExternalStorageServiceAsUser(UserHandle.USER_SYSTEM);
+        ServiceInfo serviceInfo = resolveExternalStorageServiceAsUser(userId);
         if (serviceInfo == null) {
             throw new ExternalStorageServiceException(
                     "No valid ExternalStorageService component found");

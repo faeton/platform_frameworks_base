@@ -3930,8 +3930,9 @@ class StorageManagerService extends IStorageManager.Stub
 
         // Report all volumes as unmounted until we've recorded that user 0 has unlocked. There
         // are no guarantees that callers will see a consistent view of the volume before that
-        // point
-        final boolean systemUserUnlocked = isSystemUnlocked(UserHandle.USER_SYSTEM);
+        // point. A user that unlocked on its own while user 0 is still locked gets its volumes.
+        final boolean systemUserUnlocked = isSystemUnlocked(UserHandle.USER_SYSTEM)
+                || isSystemUnlocked(userId);
 
         final boolean userIsDemo;
         final boolean storagePermission;
