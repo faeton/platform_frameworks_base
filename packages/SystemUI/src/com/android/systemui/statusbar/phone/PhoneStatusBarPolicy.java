@@ -34,7 +34,9 @@ import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.RemoteException;
+import android.os.UserHandle;
 import android.os.UserManager;
+import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.service.notification.ZenModeConfig;
 import android.telecom.TelecomManager;
@@ -43,6 +45,7 @@ import android.util.Log;
 
 import androidx.lifecycle.Observer;
 
+import com.android.internal.widget.LockPatternUtils;
 import com.android.internal.statusbar.StatusBarIcon;
 import com.android.systemui.broadcast.BroadcastDispatcher;
 import com.android.systemui.common.shared.model.Icon;
@@ -516,6 +519,26 @@ public class PhoneStatusBarPolicy
         }
     }
 
+    // The protected space: a full user other than 0 while user 0 learns USER_NULL from the
+    // authority query (only once a protected space exists). Its user can turn the icon off.
+    private boolean isProtectedSpaceMarked(int userId) {
+        if (userId == UserHandle.USER_SYSTEM || userId == UserHandle.USER_NULL) {
+            return false;
+        }
+        try {
+            final Context context = mUserTracker.getUserContext();
+            return new LockPatternUtils(context).getAlternatesAuthority() == UserHandle.USER_NULL
+                    && Settings.Secure.getIntForUser(context.getContentResolver(),
+                            PROTECTED_SPACE_INDICATOR, 1, userId) != 0;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "protected space check failed", e);
+            return false;
+        }
+    }
+
+    // per user, read in the protected space only
+    private static final String PROTECTED_SPACE_INDICATOR = "protected_space_indicator";
+
     private void updateProfileIcon() {
         // getLastResumedActivityUserId needs to acquire the AM lock, which may be contended in
         // some cases. Since it doesn't really matter here whether it's updated in this frame
@@ -523,16 +546,20 @@ public class PhoneStatusBarPolicy
         mUiBgExecutor.execute(() -> {
             try {
                 final int userId = ActivityTaskManager.getService().getLastResumedActivityUserId();
-                final int iconResId = mUserManager.isProfile(userId) ?
-                        mUserManager.getUserStatusBarIconResId(userId) : Resources.ID_NULL;
+                final boolean protectedSpace = isProtectedSpaceMarked(userId);
+                final int iconResId = protectedSpace ? R.drawable.stat_sys_protected_space
+                        : mUserManager.isProfile(userId)
+                                ? mUserManager.getUserStatusBarIconResId(userId)
+                                : Resources.ID_NULL;
                 mMainExecutor.execute(() -> {
                     final boolean showIcon;
                     if (iconResId != Resources.ID_NULL && (!mKeyguardStateController.isShowing()
                             || mKeyguardStateController.isOccluded())) {
                         String accessibilityString = "";
                         try {
-                            accessibilityString =
-                                    mUserManager.getProfileAccessibilityString(userId);
+                            accessibilityString = protectedSpace
+                                    ? mResources.getString(R.string.status_bar_protected_space)
+                                    : mUserManager.getProfileAccessibilityString(userId);
                         } catch (Resources.NotFoundException nfe) {
                             Log.e(TAG, "Accessibility string not found for userId:"
                                     + userId);

@@ -573,6 +573,12 @@ public final class DreamManagerService extends SystemService {
         mHandler.post(() -> {
             writePulseGestureEnabled();
             synchronized (mLock) {
+                // The doze dream (always-on display) is SystemUI's and serves every user.
+                // Stopping it wakes the screen, which a switch made at screen off (leaving the
+                // protected space) must not do.
+                if (mCurrentDream != null && mCurrentDream.canDoze) {
+                    return;
+                }
                 stopDreamLocked(false /*immediate*/, "user switched");
             }
         });

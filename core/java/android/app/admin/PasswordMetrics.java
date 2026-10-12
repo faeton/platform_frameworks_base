@@ -30,6 +30,7 @@ import static com.android.internal.widget.LockPatternUtils.CREDENTIAL_TYPE_PASSW
 import static com.android.internal.widget.LockPatternUtils.CREDENTIAL_TYPE_PATTERN;
 import static com.android.internal.widget.LockPatternUtils.CREDENTIAL_TYPE_PIN;
 import static com.android.internal.widget.LockPatternUtils.MIN_LOCK_PASSWORD_SIZE;
+import static com.android.internal.widget.LockPatternUtils.MIN_NEW_PIN_SIZE;
 import static com.android.internal.widget.LockPatternUtils.MIN_LOCK_PATTERN_SIZE;
 import static com.android.internal.widget.PasswordValidationError.CONTAINS_INVALID_CHARACTERS;
 import static com.android.internal.widget.PasswordValidationError.CONTAINS_SEQUENCE;
@@ -568,7 +569,9 @@ public final class PasswordMetrics implements Parcelable {
 
         // Clamp required length between maximum and minimum valid values.
         minMetrics.length = Math.min(MAX_PASSWORD_LENGTH,
-                Math.max(minMetrics.length, MIN_LOCK_PASSWORD_SIZE));
+                Math.max(minMetrics.length,
+                        actualMetrics.credType == CREDENTIAL_TYPE_PIN
+                                ? MIN_NEW_PIN_SIZE : MIN_LOCK_PASSWORD_SIZE));
         minMetrics.removeOverlapping();
 
         comparePasswordMetrics(minMetrics, bucket, actualMetrics, result);

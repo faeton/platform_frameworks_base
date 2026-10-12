@@ -4707,6 +4707,14 @@ class UserController implements Handler.Callback {
                     onShown.run();
                     return;
                 }
+                // No dialog while the user switcher is off (a protected space sets it off): it
+                // would show the other user's name and icon, and its animation delays the
+                // switch back when the screen goes off.
+                if (Settings.Global.getInt(getContext().getContentResolver(),
+                        Settings.Global.USER_SWITCHER_ENABLED, 1) == 0) {
+                    onShown.run();
+                    return;
+                }
 
                 mUserSwitchingDialog = new UserSwitchingDialog(mService.mContext, fromUser, toUser,
                         mHandler, switchingFromUserMessage, switchingToUserMessage);

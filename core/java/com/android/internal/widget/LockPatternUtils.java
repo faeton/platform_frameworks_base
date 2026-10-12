@@ -112,6 +112,12 @@ public class LockPatternUtils {
     public static final int MIN_LOCK_PASSWORD_SIZE = 4;
 
     /**
+     * The minimum length of a newly set PIN. Shorter PINs set before still unlock: guesses are
+     * only ignored below {@link #MIN_LOCK_PASSWORD_SIZE}.
+     */
+    public static final int MIN_NEW_PIN_SIZE = 6;
+
+    /**
      * The minimum number of dots the user must include in a wrong pattern attempt for it to be
      * counted.
      */

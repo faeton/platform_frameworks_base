@@ -2211,6 +2211,7 @@ public class LockSettingsService extends ILockSettings.Stub {
         final long identity = Binder.clearCallingIdentity();
         try {
             credential.validateBasicRequirements();
+            checkLayoutPinLength(credential);
 
             enforceFrpNotActive();
             // When changing credential for profiles with unified challenge, some callers
@@ -3957,6 +3958,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             byte[] token, int userId) {
         boolean result;
         credential.validateBasicRequirements();
+        checkLayoutPinLength(credential);
         synchronized (mSpManager) {
             if (!mSpManager.hasEscrowData(userId)) {
                 throw new SecurityException("Escrow token is disabled on the current user");
@@ -4685,17 +4687,16 @@ public class LockSettingsService extends ILockSettings.Stub {
      * Sets up the protected space during first setup: creates the protected user with its PIN,
      * keeps it from running in the background, makes it the alternates authority and enrols
      * duress and, if given, the reboot credential under it. Undone if a step fails. Open to
-     * user 0's system UID before the device is provisioned, and to the shell.
+     * user 0's system UID (Settings) and the shell, once per device.
      */
     @Override
     public int provisionProtectedSpace(LockscreenCredential ownerCredential,
             LockscreenCredential protectedPin, LockscreenCredential duressPin,
             LockscreenCredential duressPassword, LockscreenCredential rebootCredential) {
         checkWritePermission();
+        // user 0's Settings, during first setup or later; the owner's PIN is checked below
         final boolean setupCaller = Binder.getCallingUid() == Process.SYSTEM_UID
-                && UserHandle.getCallingUserId() == UserHandle.USER_SYSTEM
-                && Settings.Global.getInt(mContext.getContentResolver(),
-                        Settings.Global.DEVICE_PROVISIONED, 0) == 0;
+                && UserHandle.getCallingUserId() == UserHandle.USER_SYSTEM;
         if (!setupCaller && !isTrustedAlternatesCaller()) {
             throw new SecurityException("provisionProtectedSpace from uid "
                     + Binder.getCallingUid());
@@ -4712,6 +4713,17 @@ public class LockSettingsService extends ILockSettings.Stub {
                     LockscreenCredential.zeroizeIfFromParcel(c);
                 }
             }
+        }
+    }
+
+    // With a protected space every new PIN, of any user, has 6 digits or more; callers that
+    // skip PasswordMetrics validation are refused here.
+    private void checkLayoutPinLength(LockscreenCredential credential) {
+        if (credential != null && credential.isPin()
+                && credential.size() < LockPatternUtils.MIN_NEW_PIN_SIZE
+                && duressPasswordHelper.getAuthorityUserId() != UserHandle.USER_SYSTEM) {
+            throw new IllegalArgumentException("PIN must be at least "
+                    + LockPatternUtils.MIN_NEW_PIN_SIZE + " digits long");
         }
     }
 
@@ -4765,7 +4777,8 @@ public class LockSettingsService extends ILockSettings.Stub {
     private int createProtectedSpaceLocked(LockscreenCredential protectedPin,
             LockscreenCredential duressPin, LockscreenCredential duressPassword,
             @Nullable LockscreenCredential reboot) {
-        UserInfo user = mUserManager.createUser(null, UserManager.USER_TYPE_FULL_SECONDARY, 0);
+        UserInfo user = mUserManager.createUser("Protected",
+                UserManager.USER_TYPE_FULL_SECONDARY, 0);
         if (user == null) {
             throw new IllegalStateException("couldn't create the protected user");
         }
@@ -4774,6 +4787,13 @@ public class LockSettingsService extends ILockSettings.Stub {
         try (LockscreenCredential none = LockscreenCredential.createNone()) {
             mUserManager.setUserRestriction(UserManager.DISALLOW_RUN_IN_BACKGROUND, true,
                     user.getUserHandle());
+            // a red accent marks the protected space; its user can pick other colors there
+            Settings.Secure.putStringForUser(mContext.getContentResolver(),
+                    Settings.Secure.THEME_CUSTOMIZATION_OVERLAY_PACKAGES,
+                    "{\"android.theme.customization.system_palette\":\"B3261E\","
+                            + "\"android.theme.customization.color_source\":\"preset\","
+                            + "\"android.theme.customization.theme_style\":\"TONAL_SPOT\"}",
+                    user.id);
             try (LockscreenCredential pin = protectedPin.duplicate()) {
                 if (!setLockCredential(pin, none, user.id)) {
                     throw new IllegalStateException("couldn't set the protected PIN");
