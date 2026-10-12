@@ -115,8 +115,10 @@ interface ILockSettings {
     boolean isWeakEscrowTokenValid(long handle, in byte[] token, int userId);
     void unlockUserKeyIfUnsecured(int userId);
     boolean writeRepairModeCredential(int userId);
-    void setDuressCredentials(in LockscreenCredential ownerCredential, in LockscreenCredential duressPin, in LockscreenCredential duressPassword);
-    boolean hasDuressCredentials(in LockscreenCredential ownerCredential);
-    void setRebootCredential(in LockscreenCredential ownerCredential, in LockscreenCredential ownerSecondFactor, in LockscreenCredential rebootCredential);
-    boolean hasRebootCredential(in LockscreenCredential ownerCredential);
+    void setDuressCredentials(in LockscreenCredential ownerCredential, in LockscreenCredential duressPin, in LockscreenCredential duressPassword, int userId);
+    boolean hasDuressCredentials(in LockscreenCredential ownerCredential, int userId);
+    void setRebootCredential(in LockscreenCredential ownerCredential, in LockscreenCredential ownerSecondFactor, in LockscreenCredential rebootCredential, int userId);
+    boolean hasRebootCredential(in LockscreenCredential ownerCredential, int userId);
+    int getAlternatesAuthority();
+    void setAlternatesAuthority(int userId);
 }

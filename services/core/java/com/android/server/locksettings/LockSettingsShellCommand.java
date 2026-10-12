@@ -87,6 +87,15 @@ class LockSettingsShellCommand extends ShellCommand {
             return handleSetRebootCredential();
         }
 
+        if (cmd.equals("get-alternates-authority")) {
+            getOutPrintWriter().println(mLockPatternUtils.getAlternatesAuthority());
+            return 0;
+        }
+
+        if (cmd.equals("set-alternates-authority")) {
+            return handleSetAlternatesAuthority();
+        }
+
         if (cmd.equals("check-non-ce-storage-keys")) {
             return handleCheckNonCeStorageKeys();
         }
@@ -233,6 +242,14 @@ class LockSettingsShellCommand extends ShellCommand {
             pw.println("    delete all eSIMs.");
             pw.println("");
             pw.println("    If there's no owner credential, pass empty string to --owner-credential.");
+            pw.println("    The owner is the alternates authority, user 0 unless set otherwise.");
+            pw.println("");
+            pw.println("  get-alternates-authority");
+            pw.println("    Prints the user whose credential manages the duress and reboot credentials.");
+            pw.println("");
+            pw.println("  set-alternates-authority <USER_ID>");
+            pw.println("    Makes USER_ID (a full user with a screen lock, or 0) manage them. Deletes the");
+            pw.println("    reboot credential; the duress credentials stay.");
             pw.println("");
             pw.println("  set-reboot-credential --owner-credential <CREDENTIAL>");
             pw.println("      [--owner-second-factor <PIN>] --reboot-pin <PIN> | --reboot-password <PASSWORD>");
@@ -424,6 +441,25 @@ class LockSettingsShellCommand extends ShellCommand {
         getOutPrintWriter().println("Password cached removed for user " + mCurrentUserId);
     }
 
+    private int handleSetAlternatesAuthority() {
+        String arg = getNextArg();
+        if (arg == null || getNextArg() != null) {
+            getErrPrintWriter().println("usage: set-alternates-authority <USER_ID>");
+            return -1;
+        }
+        try {
+            mLockPatternUtils.setAlternatesAuthority(Integer.parseInt(arg));
+        } catch (NumberFormatException e) {
+            getErrPrintWriter().println("not a user id: " + arg);
+            return -1;
+        } catch (RuntimeException e) {
+            getErrPrintWriter().println("error: " + e.getMessage());
+            return -1;
+        }
+        getOutPrintWriter().println("Alternates authority set to user " + arg);
+        return 0;
+    }
+
     private int handleSetDuressCredentials() {
         String ownerCredential = null;
         LockscreenCredential pin = null;
@@ -491,13 +527,21 @@ class LockSettingsShellCommand extends ShellCommand {
                 return -1;
             }
 
-            mCurrentUserId = UserHandle.USER_SYSTEM;
+            // the owner credential is the alternates authority's
+            mCurrentUserId = mLockPatternUtils.getAlternatesAuthority();
             mOld = ownerCredential;
             if (!checkCredential()) {
                 return -1;
             }
 
-            mLockPatternUtils.setDuressCredentials(getOldCredential(), pin, password);
+            try {
+                mLockPatternUtils.setDuressCredentialsForUser(getOldCredential(), pin, password,
+                        mCurrentUserId);
+            } catch (ParcelableException e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                getErrPrintWriter().println("error: " + cause.getMessage());
+                return -1;
+            }
             DuressWipe.sleep5sBeforePoweroff = sleep5sBeforePoweroff;
             return 0;
         } finally {
@@ -569,7 +613,8 @@ class LockSettingsShellCommand extends ShellCommand {
                 return -1;
             }
 
-            mCurrentUserId = UserHandle.USER_SYSTEM;
+            // the owner credential is the alternates authority's
+            mCurrentUserId = mLockPatternUtils.getAlternatesAuthority();
             mOld = ownerCredential;
             if (!checkCredential()) {
                 return -1;
@@ -578,7 +623,8 @@ class LockSettingsShellCommand extends ShellCommand {
             // the call zeroizes the credentials, read what's needed first
             boolean delete = credential.isNone();
             try {
-                mLockPatternUtils.setRebootCredential(getOldCredential(), secondFactor, credential);
+                mLockPatternUtils.setRebootCredentialForUser(getOldCredential(), secondFactor,
+                        credential, mCurrentUserId);
             } catch (ParcelableException e) {
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
                 getErrPrintWriter().println("error: " + cause.getMessage());

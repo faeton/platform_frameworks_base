@@ -953,6 +953,8 @@ public class LockSettingsService extends ILockSettings.Stub {
      * because user serial numbers are never reused.
      */
     private void removeStateForReusedUserIdIfNecessary(@UserIdInt int userId, int serialNumber) {
+        // a reused id never inherits the alternates authority
+        duressPasswordHelper.dropStaleAuthority(userId, serialNumber);
         if (userId == UserHandle.USER_SYSTEM) {
             // Short circuit as we never clean up user 0.
             return;
@@ -1238,6 +1240,14 @@ public class LockSettingsService extends ILockSettings.Stub {
                 setBoolean(MIGRATED_SECONDARY_SP, true, 0);
             }
 
+            // the authority's removal may have been lost before this boot
+            int authority = duressPasswordHelper.getAuthorityUserId();
+            if (authority != UserHandle.USER_SYSTEM) {
+                UserInfo user = mUserManager.getUserInfo(authority);
+                duressPasswordHelper.dropStaleAuthority(authority,
+                        user == null || user.partial ? -1 : user.serialNumber);
+            }
+
             mThirdPartyAppsStarted = true;
         }
     }
@@ -1396,6 +1406,13 @@ public class LockSettingsService extends ILockSettings.Stub {
         mContext.enforceCallingOrSelfPermission(ACCESS_KEYGUARD_SECURE_STORAGE, message);
     }
 
+    // the alternate credentials and their authority are only reachable through their own calls
+    private static void checkNotReserved(String key) {
+        if (key != null && DuressPasswordHelper.RESERVED_KEYS.contains(key)) {
+            throw new SecurityException("reserved key " + key);
+        }
+    }
+
     private void checkDatabaseReadPermission(String requestedKey, int userId) {
         if (!hasPermission(ACCESS_KEYGUARD_SECURE_STORAGE)) {
             throw new SecurityException("uid=" + getCallingUid() + " needs permission "
@@ -1515,6 +1532,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     @Override
     public void setBoolean(String key, boolean value, int userId) {
         checkWritePermission();
+        checkNotReserved(key);
         Objects.requireNonNull(key);
         mStorage.setBoolean(key, value, userId);
     }
@@ -1522,6 +1540,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     @Override
     public void setLong(String key, long value, int userId) {
         checkWritePermission();
+        checkNotReserved(key);
         Objects.requireNonNull(key);
         mStorage.setLong(key, value, userId);
     }
@@ -1529,6 +1548,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     @Override
     public void setString(String key, String value, int userId) {
         checkWritePermission();
+        checkNotReserved(key);
         Objects.requireNonNull(key);
         mStorage.setString(key, value, userId);
     }
@@ -1536,18 +1556,21 @@ public class LockSettingsService extends ILockSettings.Stub {
     @Override
     public boolean getBoolean(String key, boolean defaultValue, int userId) {
         checkDatabaseReadPermission(key, userId);
+        checkNotReserved(key);
         return mStorage.getBoolean(key, defaultValue, userId);
     }
 
     @Override
     public long getLong(String key, long defaultValue, int userId) {
         checkDatabaseReadPermission(key, userId);
+        checkNotReserved(key);
         return mStorage.getLong(key, defaultValue, userId);
     }
 
     @Override
     public String getString(String key, String defaultValue, int userId) {
         checkDatabaseReadPermission(key, userId);
+        checkNotReserved(key);
         return mStorage.getString(key, defaultValue, userId);
     }
 
@@ -3108,6 +3131,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     }
 
     private void removeUserState(@UserIdInt int userId) {
+        duressPasswordHelper.onUserRemoved(userId);
         removeBiometricsForUser(userId);
         mSpManager.removeUser(getGateKeeperService(), userId);
         mStrongAuth.removeUser(userId);
@@ -4493,11 +4517,12 @@ public class LockSettingsService extends ILockSettings.Stub {
 
     @Override
     public void setDuressCredentials(LockscreenCredential ownerCredential,
-            LockscreenCredential pin, LockscreenCredential password) {
+            LockscreenCredential pin, LockscreenCredential password, int userId) {
         try {
             checkWritePermission();
+            checkCallerIsUser(userId);
             try {
-                duressPasswordHelper.setDuressCredentials(ownerCredential, pin, password);
+                duressPasswordHelper.setDuressCredentials(ownerCredential, pin, password, userId);
             } catch (Throwable e) {
                 throw new ParcelableException(e);
             }
@@ -4507,10 +4532,11 @@ public class LockSettingsService extends ILockSettings.Stub {
     }
 
     @Override
-    public boolean hasDuressCredentials(LockscreenCredential ownerCredential) {
+    public boolean hasDuressCredentials(LockscreenCredential ownerCredential, int userId) {
         try {
             checkHavePermission();
-            return duressPasswordHelper.hasDuressCredentials(ownerCredential);
+            checkCallerIsUser(userId);
+            return duressPasswordHelper.hasDuressCredentials(ownerCredential, userId);
         } finally {
             zeroizeAll(ownerCredential);
         }
@@ -4518,12 +4544,14 @@ public class LockSettingsService extends ILockSettings.Stub {
 
     @Override
     public void setRebootCredential(LockscreenCredential ownerCredential,
-            LockscreenCredential ownerSecondFactor, LockscreenCredential rebootCredential) {
+            LockscreenCredential ownerSecondFactor, LockscreenCredential rebootCredential,
+            int userId) {
         try {
             checkWritePermission();
+            checkCallerIsUser(userId);
             try {
                 duressPasswordHelper.setRebootCredential(ownerCredential, ownerSecondFactor,
-                        rebootCredential);
+                        rebootCredential, userId);
             } catch (Throwable e) {
                 throw new ParcelableException(e);
             }
@@ -4533,13 +4561,82 @@ public class LockSettingsService extends ILockSettings.Stub {
     }
 
     @Override
-    public boolean hasRebootCredential(LockscreenCredential ownerCredential) {
+    public boolean hasRebootCredential(LockscreenCredential ownerCredential, int userId) {
         try {
             checkHavePermission();
-            return duressPasswordHelper.hasRebootCredential(ownerCredential);
+            checkCallerIsUser(userId);
+            return duressPasswordHelper.hasRebootCredential(ownerCredential, userId);
         } finally {
             zeroizeAll(ownerCredential);
         }
+    }
+
+    /**
+     * The user that manages the alternate credentials. Other callers only learn whether it is
+     * their own user, not which user it is.
+     */
+    @Override
+    public int getAlternatesAuthority() {
+        checkHavePermission();
+        int authority = duressPasswordHelper.getAuthorityUserId();
+        if (isTrustedAlternatesCaller()) {
+            return authority;
+        }
+        int callingUserId = UserHandle.getCallingUserId();
+        return authority == callingUserId ? authority : UserHandle.USER_NULL;
+    }
+
+    /**
+     * Makes {@code userId} the user that manages the alternate credentials. Only system_server
+     * itself (the shell command runs there) and the shell may change it: the user it takes the
+     * alternates from can't refuse, and UID 1000 also covers user 0's Settings.
+     */
+    @Override
+    public void setAlternatesAuthority(int userId) {
+        checkWritePermission();
+        if (!isTrustedAlternatesCaller()) {
+            throw new SecurityException("setAlternatesAuthority from uid "
+                    + Binder.getCallingUid());
+        }
+        final long token = Binder.clearCallingIdentity();
+        try {
+            setAlternatesAuthorityInternal(userId);
+        } finally {
+            Binder.restoreCallingIdentity(token);
+        }
+    }
+
+    private void setAlternatesAuthorityInternal(int userId) {
+        // a user removed between the checks and the write would leave a stale authority
+        synchronized (mUserCreationAndRemovalLock) {
+            UserInfo user = mUserManager.getUserInfo(userId);
+            if (user == null || !user.isFull() || user.isProfile() || user.partial
+                    || user.preCreated || user.isGuest() || user.isEphemeral() || user.isDemo()) {
+                throw new IllegalArgumentException("not a full user: " + userId);
+            }
+            if (userId != UserHandle.USER_SYSTEM && !isUserSecure(userId)) {
+                throw new IllegalStateException("user " + userId + " has no screen lock");
+            }
+            duressPasswordHelper.setAuthority(userId, user.serialNumber);
+        }
+    }
+
+    // The alternate credential calls act for the calling user; only trusted callers may name
+    // another.
+    private static void checkCallerIsUser(int userId) {
+        if (UserHandle.getCallingUserId() == userId || isTrustedAlternatesCaller()) {
+            return;
+        }
+        throw new SecurityException("uid " + Binder.getCallingUid() + " can't act for user "
+                + userId);
+    }
+
+    // System_server itself (shell commands run here after clearing the caller identity), the
+    // shell and root. Not UID 1000 from another process: user 0's Settings runs as it.
+    private static boolean isTrustedAlternatesCaller() {
+        int uid = Binder.getCallingUid();
+        return (uid == Process.SYSTEM_UID && Binder.getCallingPid() == Process.myPid())
+                || uid == Process.SHELL_UID || uid == Process.ROOT_UID;
     }
 
     // credentials of the alternate credential calls, any of them may be null

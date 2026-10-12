@@ -23,7 +23,7 @@ import static com.android.internal.widget.LockPatternUtils.PIN_LENGTH_UNAVAILABL
  * credential. Stored next to the duress credentials, in the same format, under its own key.
  */
 class RebootCredential {
-    private static final String LOCK_SETTINGS_STORAGE_KEY = "reboot_credential";
+    static final String LOCK_SETTINGS_STORAGE_KEY = "reboot_credential";
     private static final int LOCK_SETTINGS_STORAGE_USER_ID = UserHandle.USER_SYSTEM;
 
     private static final int VERSION = 0;

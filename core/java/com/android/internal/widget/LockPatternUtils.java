@@ -2235,11 +2235,23 @@ public class LockPatternUtils {
         return PasswordMetrics.validateCredential(metrics, DevicePolicyManager.PASSWORD_COMPLEXITY_LOW, credential);
     }
 
+    // The alternate credential calls below act for the context's user, which must be the
+    // alternates authority (user 0 unless the device has a protected space); the *ForUser
+    // variants are for the shell and the system.
+
     public void setDuressCredentials(@NonNull LockscreenCredential ownerCredential,
                                      @NonNull LockscreenCredential duressPin,
                                      @NonNull LockscreenCredential duressPassword) {
+        setDuressCredentialsForUser(ownerCredential, duressPin, duressPassword,
+                mContext.getUserId());
+    }
+
+    public void setDuressCredentialsForUser(@NonNull LockscreenCredential ownerCredential,
+            @NonNull LockscreenCredential duressPin, @NonNull LockscreenCredential duressPassword,
+            int userId) {
         try {
-            getLockSettings().setDuressCredentials(ownerCredential, duressPin, duressPassword);
+            getLockSettings().setDuressCredentials(ownerCredential, duressPin, duressPassword,
+                    userId);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }
@@ -2247,16 +2259,12 @@ public class LockPatternUtils {
 
     public void deleteDuressCredentials(@NonNull LockscreenCredential ownerCredential) {
         var noCredential = LockscreenCredential.createNone();
-        try {
-            getLockSettings().setDuressCredentials(ownerCredential, noCredential, noCredential);
-        } catch (RemoteException e) {
-            throw e.rethrowFromSystemServer();
-        }
+        setDuressCredentials(ownerCredential, noCredential, noCredential);
     }
 
     public boolean hasDuressCredentials(@NonNull LockscreenCredential ownerCredential) {
         try {
-            return getLockSettings().hasDuressCredentials(ownerCredential);
+            return getLockSettings().hasDuressCredentials(ownerCredential, mContext.getUserId());
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }
@@ -2265,9 +2273,16 @@ public class LockPatternUtils {
     public void setRebootCredential(@NonNull LockscreenCredential ownerCredential,
                                     @NonNull LockscreenCredential ownerSecondFactor,
                                     @NonNull LockscreenCredential rebootCredential) {
+        setRebootCredentialForUser(ownerCredential, ownerSecondFactor, rebootCredential,
+                mContext.getUserId());
+    }
+
+    public void setRebootCredentialForUser(@NonNull LockscreenCredential ownerCredential,
+            @NonNull LockscreenCredential ownerSecondFactor,
+            @NonNull LockscreenCredential rebootCredential, int userId) {
         try {
             getLockSettings().setRebootCredential(ownerCredential, ownerSecondFactor,
-                    rebootCredential);
+                    rebootCredential, userId);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }
@@ -2275,16 +2290,34 @@ public class LockPatternUtils {
 
     public void deleteRebootCredential(@NonNull LockscreenCredential ownerCredential) {
         var noCredential = LockscreenCredential.createNone();
+        setRebootCredential(ownerCredential, noCredential, noCredential);
+    }
+
+    public boolean hasRebootCredential(@NonNull LockscreenCredential ownerCredential) {
         try {
-            getLockSettings().setRebootCredential(ownerCredential, noCredential, noCredential);
+            return getLockSettings().hasRebootCredential(ownerCredential, mContext.getUserId());
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }
     }
 
-    public boolean hasRebootCredential(@NonNull LockscreenCredential ownerCredential) {
+    /** The user whose credential manages the duress and reboot credentials. */
+    public int getAlternatesAuthority() {
         try {
-            return getLockSettings().hasRebootCredential(ownerCredential);
+            return getLockSettings().getAlternatesAuthority();
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
+    /** True when the context's user manages the duress and reboot credentials. */
+    public boolean isAlternatesAuthority() {
+        return getAlternatesAuthority() == mContext.getUserId();
+    }
+
+    public void setAlternatesAuthority(int userId) {
+        try {
+            getLockSettings().setAlternatesAuthority(userId);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }

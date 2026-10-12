@@ -13,6 +13,7 @@ import com.android.internal.widget.LockscreenCredential;
 import com.android.internal.widget.VerifyCredentialResponse;
 
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import static com.android.internal.widget.LockDomain.Primary;
@@ -33,11 +34,23 @@ public class DuressPasswordHelper {
     // collision checks of the alternate credentials and their writes
     private final Object alternatesLock = new Object();
 
-    // owner credential changes, an enrolment that overlaps one is refused
+    // Changes of the owner's credential or of who the owner is. A call that checked the owner's
+    // credential is refused if this moved before it reads or writes the alternates.
     @GuardedBy("alternatesLock")
     private int ownerCredentialChanges;
 
     static final String OWNER_CREDENTIAL_CHANGED = "owner credential changed, try again";
+    static final String NOT_AUTHORITY = "not the alternates authority";
+
+    // The user whose credential manages the alternate credentials ("owner" below). User 0
+    // unless the device is set up with a protected space, which then holds them. The serial
+    // number guards against a removed user's id being reused.
+    private static final String AUTHORITY_KEY = "alternates_authority_user";
+    private static final String AUTHORITY_SERIAL_KEY = "alternates_authority_serial";
+
+    /** Records only this class may read or write, never through the generic key calls. */
+    static final Set<String> RESERVED_KEYS = Set.of(AUTHORITY_KEY, AUTHORITY_SERIAL_KEY,
+            DuressCredentials.LOCK_SETTINGS_STORAGE_KEY, RebootCredential.LOCK_SETTINGS_STORAGE_KEY);
 
     // successful verifications per user, a queued reboot is dropped when this changes
     @GuardedBy("verifiedCount")
@@ -149,11 +162,10 @@ public class DuressPasswordHelper {
      * May be called with the SyntheticPasswordManager lock held: only counts.
      */
     protected void onLockCredentialChanging(int userId) {
-        if (userId != UserHandle.USER_SYSTEM) {
-            return;
-        }
         synchronized (alternatesLock) {
-            ownerCredentialChanges++;
+            if (userId == authorityLocked()) {
+                ownerCredentialChanges++;
+            }
         }
     }
 
@@ -164,10 +176,10 @@ public class DuressPasswordHelper {
      */
     protected void onLockCredentialChanged(LockscreenCredential newCredential,
             LockDomain lockDomain, int userId) {
-        if (userId != UserHandle.USER_SYSTEM) {
-            return;
-        }
         synchronized (alternatesLock) {
+            if (userId != authorityLocked()) {
+                return;
+            }
             ownerCredentialChanges++;
             // the change is already committed: never fail it from here
             try {
@@ -194,8 +206,102 @@ public class DuressPasswordHelper {
         }
     }
 
-    private void checkOwnerCredential(LockscreenCredential ownerCredential) {
-        int userId = UserHandle.USER_SYSTEM;
+    /** The user whose own credential manages the alternate credentials. */
+    int getAuthorityUserId() {
+        synchronized (alternatesLock) {
+            return authorityLocked();
+        }
+    }
+
+    @GuardedBy("alternatesLock")
+    private int authorityLocked() {
+        return lockSettingsStorage.getInt(AUTHORITY_KEY, UserHandle.USER_SYSTEM,
+                UserHandle.USER_SYSTEM);
+    }
+
+    /**
+     * Makes {@code userId}, whose serial number is {@code serialNumber}, the user that manages
+     * the alternate credentials. The reboot credential was enrolled against the previous one's
+     * credential and is deleted; the duress credentials are device-wide and stay.
+     */
+    void setAuthority(int userId, int serialNumber) {
+        synchronized (alternatesLock) {
+            setAuthorityLocked(userId, serialNumber);
+        }
+    }
+
+    @GuardedBy("alternatesLock")
+    private void setAuthorityLocked(int userId, int serialNumber) {
+        if (userId == authorityLocked() && (userId == UserHandle.USER_SYSTEM || serialNumber
+                == lockSettingsStorage.getInt(AUTHORITY_SERIAL_KEY, -1, UserHandle.USER_SYSTEM))) {
+            return;
+        }
+        ownerCredentialChanges++;
+        RebootCredential.delete(lockSettingsStorage);
+        if (userId == UserHandle.USER_SYSTEM) {
+            lockSettingsStorage.removeKey(AUTHORITY_KEY, UserHandle.USER_SYSTEM);
+            lockSettingsStorage.removeKey(AUTHORITY_SERIAL_KEY, UserHandle.USER_SYSTEM);
+        } else {
+            lockSettingsStorage.setInt(AUTHORITY_SERIAL_KEY, serialNumber, UserHandle.USER_SYSTEM);
+            lockSettingsStorage.setInt(AUTHORITY_KEY, userId, UserHandle.USER_SYSTEM);
+        }
+        Slog.i(TAG, "alternates authority is now user " + userId);
+    }
+
+    /** A removed authority hands the alternates back to user 0. */
+    void onUserRemoved(int userId) {
+        synchronized (alternatesLock) {
+            if (userId == authorityLocked()) {
+                setAuthorityLocked(UserHandle.USER_SYSTEM, 0);
+            }
+        }
+    }
+
+    /**
+     * Drops an authority whose user is gone or whose id now belongs to another user, for removals
+     * that never reached {@link #onUserRemoved}. {@code currentSerialNumber} is the serial number
+     * of the user that now has the stored id, or -1 if there is none.
+     */
+    void dropStaleAuthority(int userId, int currentSerialNumber) {
+        synchronized (alternatesLock) {
+            if (userId == UserHandle.USER_SYSTEM || userId != authorityLocked()) {
+                return;
+            }
+            int stored = lockSettingsStorage.getInt(AUTHORITY_SERIAL_KEY, -1,
+                    UserHandle.USER_SYSTEM);
+            if (currentSerialNumber != stored) {
+                Slog.w(TAG, "alternates authority user " + userId + " is gone");
+                setAuthorityLocked(UserHandle.USER_SYSTEM, 0);
+            }
+        }
+    }
+
+    /**
+     * Checks that {@code userId} is the authority and returns the change count to pass to
+     * {@link #checkUnchangedLocked} once its credential has been checked.
+     */
+    private int checkAuthority(int userId) {
+        synchronized (alternatesLock) {
+            if (userId != authorityLocked()) {
+                throw new SecurityException(NOT_AUTHORITY);
+            }
+            return ownerCredentialChanges;
+        }
+    }
+
+    // credential checks run outside alternatesLock (they may take the SyntheticPasswordManager
+    // lock), so the authority or its credential may have changed since
+    @GuardedBy("alternatesLock")
+    private void checkUnchangedLocked(int userId, int changesBefore) {
+        if (ownerCredentialChanges != changesBefore) {
+            throw new IllegalStateException(OWNER_CREDENTIAL_CHANGED);
+        }
+        if (userId != authorityLocked()) {
+            throw new SecurityException(NOT_AUTHORITY);
+        }
+    }
+
+    private void checkOwnerCredential(LockscreenCredential ownerCredential, int userId) {
 
         if (lockSettingsService.getCredentialType(userId) == CREDENTIAL_TYPE_NONE) {
             if (!ownerCredential.isNone()) {
@@ -212,16 +318,20 @@ public class DuressPasswordHelper {
     }
 
     protected void setDuressCredentials(LockscreenCredential ownerCredential,
-                                 LockscreenCredential pin, LockscreenCredential password) {
+            LockscreenCredential pin, LockscreenCredential password, int userId) {
         Objects.requireNonNull(ownerCredential, "ownerCredential");
         Objects.requireNonNull(pin, "pin");
         Objects.requireNonNull(password, "password");
 
-        checkOwnerCredential(ownerCredential);
+        int changesBefore = checkAuthority(userId);
+        checkOwnerCredential(ownerCredential, userId);
 
         if (pin.isNone() && password.isNone()) {
-            // exception handling is delegated to the caller
-            DuressCredentials.delete(lockSettingsStorage);
+            synchronized (alternatesLock) {
+                checkUnchangedLocked(userId, changesBefore);
+                // exception handling is delegated to the caller
+                DuressCredentials.delete(lockSettingsStorage);
+            }
             Slog.d(TAG, "deleted duress credentials");
             return;
         }
@@ -230,6 +340,7 @@ public class DuressPasswordHelper {
         DuressCredential.validate(password, CREDENTIAL_TYPE_PASSWORD);
 
         synchronized (alternatesLock) {
+            checkUnchangedLocked(userId, changesBefore);
             DuressCredential rc;
             try {
                 rc = RebootCredential.maybeGet(lockSettingsStorage);
@@ -251,9 +362,13 @@ public class DuressPasswordHelper {
         }
     }
 
-    protected boolean hasDuressCredentials(LockscreenCredential ownerCredential) {
-        checkOwnerCredential(ownerCredential);
-        return DuressCredentials.maybeGet(lockSettingsStorage) != null;
+    protected boolean hasDuressCredentials(LockscreenCredential ownerCredential, int userId) {
+        int changesBefore = checkAuthority(userId);
+        checkOwnerCredential(ownerCredential, userId);
+        synchronized (alternatesLock) {
+            checkUnchangedLocked(userId, changesBefore);
+            return DuressCredentials.maybeGet(lockSettingsStorage) != null;
+        }
     }
 
     static final String COLLISION_OWNER = "collision: owner credential";
@@ -267,17 +382,13 @@ public class DuressPasswordHelper {
      * candidate can be compared with it in memory instead of being probed through a verifier.
      */
     protected void setRebootCredential(LockscreenCredential ownerCredential,
-            LockscreenCredential ownerSecondFactor, LockscreenCredential credential) {
+            LockscreenCredential ownerSecondFactor, LockscreenCredential credential, int userId) {
         Objects.requireNonNull(ownerCredential, "ownerCredential");
         Objects.requireNonNull(ownerSecondFactor, "ownerSecondFactor");
         Objects.requireNonNull(credential, "credential");
 
-        int userId = UserHandle.USER_SYSTEM;
         // sampled before the owner checks: a change after them would make the checks stale
-        int changesBefore;
-        synchronized (alternatesLock) {
-            changesBefore = ownerCredentialChanges;
-        }
+        int changesBefore = checkAuthority(userId);
         boolean hasSecondFactor =
                 lockSettingsService.getCredentialType(userId, Secondary) != CREDENTIAL_TYPE_NONE;
 
@@ -285,11 +396,12 @@ public class DuressPasswordHelper {
         boolean sameAsOwner = credential.equals(ownerCredential);
         boolean sameAsSecondFactor = hasSecondFactor && credential.equals(ownerSecondFactor);
 
-        checkOwnerCredential(ownerCredential);
+        checkOwnerCredential(ownerCredential, userId);
 
         if (credential.isNone()) {
             // deleting never parses the record, so a corrupt one can always be removed
             synchronized (alternatesLock) {
+                checkUnchangedLocked(userId, changesBefore);
                 RebootCredential.delete(lockSettingsStorage);
             }
             Slog.d(TAG, "deleted reboot credential");
@@ -328,9 +440,7 @@ public class DuressPasswordHelper {
         // the owner checks above verify through doVerifyCredential and may take the
         // SyntheticPasswordManager lock, so they stay outside alternatesLock
         synchronized (alternatesLock) {
-            if (ownerCredentialChanges != changesBefore) {
-                throw new IllegalStateException(OWNER_CREDENTIAL_CHANGED);
-            }
+            checkUnchangedLocked(userId, changesBefore);
             DuressCredentials dc = DuressCredentials.maybeGet(lockSettingsStorage);
             if (dc != null && dc.get(type).verify(spManager, credential)) {
                 throw new IllegalArgumentException(COLLISION_DURESS);
@@ -346,9 +456,13 @@ public class DuressPasswordHelper {
     void afterOwnerChecks() {
     }
 
-    protected boolean hasRebootCredential(LockscreenCredential ownerCredential) {
-        checkOwnerCredential(ownerCredential);
-        return RebootCredential.maybeGet(lockSettingsStorage) != null;
+    protected boolean hasRebootCredential(LockscreenCredential ownerCredential, int userId) {
+        int changesBefore = checkAuthority(userId);
+        checkOwnerCredential(ownerCredential, userId);
+        synchronized (alternatesLock) {
+            checkUnchangedLocked(userId, changesBefore);
+            return RebootCredential.maybeGet(lockSettingsStorage) != null;
+        }
     }
 
     private boolean isRebootCredential(LockscreenCredential credential) {

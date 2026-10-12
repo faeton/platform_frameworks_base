@@ -61,11 +61,12 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     }
 
     private void setReboot(String pin) {
-        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), newPin(pin));
+        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), newPin(pin), PRIMARY_USER_ID);
     }
 
     private void setDuress(String pin, String password) {
-        mHelper.setDuressCredentials(newPin(OWNER), newPin(pin), newPassword(password));
+        mHelper.setDuressCredentials(newPin(OWNER), newPin(pin), newPassword(password),
+                PRIMARY_USER_ID);
     }
 
     private void enter(LockscreenCredential credential, int userId) {
@@ -86,7 +87,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     @Test
     public void rebootCredential_firesAtEveryUsersPrompt() {
         setReboot(REBOOT);
-        assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isTrue();
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isTrue();
 
         enter(newPin(REBOOT), PRIMARY_USER_ID);
         enter(newPin(REBOOT), SECONDARY_USER_ID);
@@ -112,7 +113,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
 
     @Test
     public void rebootCredential_password() {
-        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), newPassword("reboot-pw"));
+        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), newPassword("reboot-pw"), PRIMARY_USER_ID);
 
         enter(newPassword("reboot-pw"), PRIMARY_USER_ID);
 
@@ -181,7 +182,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         setDuress(DURESS_PIN, DURESS_PASSWORD);
         assertCollision(DuressPasswordHelper.COLLISION_DURESS, () -> setReboot(DURESS_PIN));
         assertCollision(DuressPasswordHelper.COLLISION_DURESS, () -> mHelper.setRebootCredential(
-                newPin(OWNER), nonePassword(), newPassword(DURESS_PASSWORD)));
+                newPin(OWNER), nonePassword(), newPassword(DURESS_PASSWORD), PRIMARY_USER_ID));
 
         setReboot(REBOOT);
         // reverse check, the old duress credentials stay
@@ -194,8 +195,8 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     @Test
     public void enrolment_wrongOwnerCredential() {
         assertThrows(SecurityException.class, () -> mHelper.setRebootCredential(newPin("0000"),
-                nonePassword(), newPin(REBOOT)));
-        assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isFalse();
+                nonePassword(), newPin(REBOOT), PRIMARY_USER_ID));
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
     }
 
     @Test
@@ -206,9 +207,9 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     @Test
     public void delete() {
         setReboot(REBOOT);
-        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), nonePassword());
+        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), nonePassword(), PRIMARY_USER_ID);
 
-        assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isFalse();
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
         enter(newPin(REBOOT), PRIMARY_USER_ID);
         assertThat(mReboots).isEqualTo(0);
     }
@@ -267,15 +268,15 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
             assertThat(mReboots).isEqualTo(0);
 
             var e = assertThrows(IllegalStateException.class,
-                    () -> mHelper.hasRebootCredential(newPin(OWNER)));
+                    () -> mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID));
             // fixed message, the record is never logged
             assertThat(e).hasMessageThat().isEqualTo("corrupt reboot credential record");
         }
         // duress still works, and deleting needs no parsing
         enter(newPin(DURESS_PIN), PRIMARY_USER_ID);
         assertThat(mWipes).isEqualTo(1);
-        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), nonePassword());
-        assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isFalse();
+        mHelper.setRebootCredential(newPin(OWNER), nonePassword(), nonePassword(), PRIMARY_USER_ID);
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
     }
 
     @Test
@@ -310,7 +311,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         for (String record : damaged) {
             mStorage.setString("reboot_credential", record, PRIMARY_USER_ID);
             var e = assertThrows(IllegalStateException.class,
-                    () -> mHelper.hasRebootCredential(newPin(OWNER)));
+                    () -> mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID));
             assertThat(e).hasMessageThat().isEqualTo("corrupt reboot credential record");
             enter(newPin(REBOOT), PRIMARY_USER_ID);
         }
@@ -330,12 +331,12 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         // missing or wrong second factor
         assertThrows(SecurityException.class, () -> setReboot(REBOOT));
         assertThrows(SecurityException.class, () -> mHelper.setRebootCredential(newPin(OWNER),
-                newPin("135790"), newPin(REBOOT)));
+                newPin("135790"), newPin(REBOOT), PRIMARY_USER_ID));
         assertCollision(DuressPasswordHelper.COLLISION_SECOND_FACTOR,
                 () -> mHelper.setRebootCredential(newPin(OWNER), newPin(secondFactor),
-                        newPin(secondFactor)));
+                        newPin(secondFactor), PRIMARY_USER_ID));
 
-        mHelper.setRebootCredential(newPin(OWNER), newPin(secondFactor), newPin(REBOOT));
+        mHelper.setRebootCredential(newPin(OWNER), newPin(secondFactor), newPin(REBOOT), PRIMARY_USER_ID);
         enter(newPin(REBOOT), PRIMARY_USER_ID);
         assertThat(mReboots).isEqualTo(1);
     }
@@ -361,7 +362,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
 
         var e = assertThrows(IllegalStateException.class, () -> setReboot(REBOOT));
         assertThat(e).hasMessageThat().isEqualTo(DuressPasswordHelper.OWNER_CREDENTIAL_CHANGED);
-        assertThat(mHelper.hasRebootCredential(newPin(OWNER))).isFalse();
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
     }
 
     @Test
@@ -389,5 +390,172 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         mService.verifyCredential(newPin(OWNER), PRIMARY_USER_ID, 0);
         verify(mock).onVerifyCredentialResult(argThat(r -> r.isMatched()), any(),
                 eq(PRIMARY_USER_ID));
+    }
+
+    private static final String PROTECTED = "2222";
+    private static final int SECONDARY_SERIAL = 7;
+
+    // a secondary user with a screen lock that manages the alternates
+    private void makeSecondaryTheAuthority() {
+        mService.initializeSyntheticPassword(SECONDARY_USER_ID);
+        assertTrue(mService.setLockCredential(newPin(PROTECTED), nonePassword(),
+                SECONDARY_USER_ID));
+        mHelper.setAuthority(SECONDARY_USER_ID, SECONDARY_SERIAL);
+    }
+
+    @Test
+    public void authority_defaultsToTheOwner() {
+        assertThat(mHelper.getAuthorityUserId()).isEqualTo(PRIMARY_USER_ID);
+        var e = assertThrows(SecurityException.class, () -> mHelper.setRebootCredential(
+                newPin(PROTECTED), nonePassword(), newPin(REBOOT), SECONDARY_USER_ID));
+        assertThat(e).hasMessageThat().isEqualTo(DuressPasswordHelper.NOT_AUTHORITY);
+    }
+
+    @Test
+    public void authority_secondaryUserManagesTheAlternates() {
+        makeSecondaryTheAuthority();
+
+        mHelper.setRebootCredential(newPin(PROTECTED), nonePassword(), newPin(REBOOT),
+                SECONDARY_USER_ID);
+        mHelper.setDuressCredentials(newPin(PROTECTED), newPin(DURESS_PIN),
+                newPassword(DURESS_PASSWORD), SECONDARY_USER_ID);
+        assertThat(mHelper.hasRebootCredential(newPin(PROTECTED), SECONDARY_USER_ID)).isTrue();
+        assertThat(mHelper.hasDuressCredentials(newPin(PROTECTED), SECONDARY_USER_ID)).isTrue();
+
+        // the owner no longer can, even with the right credential
+        assertThrows(SecurityException.class,
+                () -> mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID));
+        assertThrows(SecurityException.class, () -> mHelper.setDuressCredentials(newPin(OWNER),
+                nonePassword(), nonePassword(), PRIMARY_USER_ID));
+        // a wrong credential of the authority is refused as before
+        assertThrows(SecurityException.class,
+                () -> mHelper.hasRebootCredential(newPin("0000"), SECONDARY_USER_ID));
+
+        // the alternates still fire at every user's prompt
+        enter(newPin(REBOOT), PRIMARY_USER_ID);
+        assertThat(mReboots).isEqualTo(1);
+        enter(newPin(DURESS_PIN), SECONDARY_USER_ID);
+        assertThat(mWipes).isEqualTo(1);
+    }
+
+    @Test
+    public void authority_collisionsUseTheAuthoritysCredential() {
+        makeSecondaryTheAuthority();
+        assertCollision(DuressPasswordHelper.COLLISION_OWNER, () -> mHelper.setRebootCredential(
+                newPin(PROTECTED), nonePassword(), newPin(PROTECTED), SECONDARY_USER_ID));
+    }
+
+    @Test
+    public void authority_changeDeletesTheRebootCredentialOnly() {
+        setReboot(REBOOT);
+        setDuress(DURESS_PIN, DURESS_PASSWORD);
+        makeSecondaryTheAuthority();
+
+        assertThat(mHelper.hasRebootCredential(newPin(PROTECTED), SECONDARY_USER_ID)).isFalse();
+        assertThat(mHelper.hasDuressCredentials(newPin(PROTECTED), SECONDARY_USER_ID)).isTrue();
+        enter(newPin(REBOOT), PRIMARY_USER_ID);
+        assertThat(mReboots).isEqualTo(0);
+    }
+
+    @Test
+    public void authority_credentialChangesFollowTheAuthority() {
+        makeSecondaryTheAuthority();
+        mHelper.setRebootCredential(newPin(PROTECTED), nonePassword(), newPin(REBOOT),
+                SECONDARY_USER_ID);
+
+        // the owner's changes don't touch it any more
+        mHelper.onLockCredentialChanged(newPin(REBOOT), Primary, PRIMARY_USER_ID);
+        mHelper.onLockCredentialChanged(nonePassword(), Primary, PRIMARY_USER_ID);
+        enter(newPin(REBOOT), PRIMARY_USER_ID);
+        assertThat(mReboots).isEqualTo(1);
+
+        // the authority removing its lock deletes it
+        mHelper.onLockCredentialChanged(nonePassword(), Primary, SECONDARY_USER_ID);
+        enter(newPin(REBOOT), PRIMARY_USER_ID);
+        assertThat(mReboots).isEqualTo(1);
+    }
+
+    @Test
+    public void authority_enrolmentRefusedWhenAuthorityChangesMeanwhile() {
+        mHelper = new DuressPasswordHelper(mService, mStorage, mSpManager,
+                new DuressPasswordHelper.Actions() {
+                    @Override
+                    public void wipe() {
+                    }
+
+                    @Override
+                    public void reboot() {
+                    }
+                }) {
+            @Override
+            void afterOwnerChecks() {
+                setAuthority(SECONDARY_USER_ID, SECONDARY_SERIAL);
+            }
+        };
+
+        assertThrows(IllegalStateException.class, () -> setReboot(REBOOT));
+        assertThat(mStorage.getString("reboot_credential", null, PRIMARY_USER_ID)).isNull();
+    }
+
+    @Test
+    public void authority_removedUserHandsTheAlternatesBack() {
+        makeSecondaryTheAuthority();
+        mHelper.setRebootCredential(newPin(PROTECTED), nonePassword(), newPin(REBOOT),
+                SECONDARY_USER_ID);
+
+        mHelper.onUserRemoved(SECONDARY_USER_ID);
+        assertThat(mHelper.getAuthorityUserId()).isEqualTo(PRIMARY_USER_ID);
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
+        // removing another user changes nothing
+        mHelper.setAuthority(SECONDARY_USER_ID, SECONDARY_SERIAL);
+        mHelper.onUserRemoved(TERTIARY_USER_ID);
+        assertThat(mHelper.getAuthorityUserId()).isEqualTo(SECONDARY_USER_ID);
+    }
+
+    @Test
+    public void authority_reusedUserIdDoesNotInheritIt() {
+        makeSecondaryTheAuthority();
+        mHelper.setRebootCredential(newPin(PROTECTED), nonePassword(), newPin(REBOOT),
+                SECONDARY_USER_ID);
+
+        // the same user, as at boot: kept
+        mHelper.dropStaleAuthority(SECONDARY_USER_ID, SECONDARY_SERIAL);
+        assertThat(mHelper.getAuthorityUserId()).isEqualTo(SECONDARY_USER_ID);
+        // another user with the same id, or none: handed back, reboot credential gone
+        mHelper.dropStaleAuthority(SECONDARY_USER_ID, SECONDARY_SERIAL + 1);
+        assertThat(mHelper.getAuthorityUserId()).isEqualTo(PRIMARY_USER_ID);
+        assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
+    }
+
+    @Test
+    public void reservedKeys_notReachableThroughTheGenericCalls() {
+        for (String key : DuressPasswordHelper.RESERVED_KEYS) {
+            assertThrows(SecurityException.class,
+                    () -> mService.setString(key, "1", PRIMARY_USER_ID));
+            assertThrows(SecurityException.class,
+                    () -> mService.setLong(key, 1, PRIMARY_USER_ID));
+            assertThrows(SecurityException.class,
+                    () -> mService.setBoolean(key, true, PRIMARY_USER_ID));
+            assertThrows(SecurityException.class,
+                    () -> mService.getString(key, null, PRIMARY_USER_ID));
+            assertThrows(SecurityException.class,
+                    () -> mService.getLong(key, 0, PRIMARY_USER_ID));
+            assertThrows(SecurityException.class,
+                    () -> mService.getBoolean(key, false, PRIMARY_USER_ID));
+        }
+    }
+
+    @Test
+    public void authority_onlyTrustedCallersMaySetIt() {
+        // the test runs under its own app uid
+        assertThrows(SecurityException.class,
+                () -> mService.setAlternatesAuthority(SECONDARY_USER_ID));
+    }
+
+    @Test
+    public void authority_callsActForTheCallingUser() {
+        // the test's uid belongs to user 0, so it can't act for another user
+        assertThrows(SecurityException.class, () -> mService.hasRebootCredential(
+                newPin(PROTECTED), SECONDARY_USER_ID));
     }
 }

@@ -38,7 +38,7 @@ class DuressCredentials {
                 DuressCredential.create(password, spm));
     }
 
-    private static final String LOCK_SETTINGS_STORAGE_KEY = "duress_credentials";
+    static final String LOCK_SETTINGS_STORAGE_KEY = "duress_credentials";
     private static final int LOCK_SETTINGS_STORAGE_USER_ID = UserHandle.USER_SYSTEM;
 
     void save(LockSettingsStorage lss) {
