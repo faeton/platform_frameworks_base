@@ -260,7 +260,7 @@ class LockSettingsShellCommand extends ShellCommand {
             pw.println("    reboot credential; the duress credentials stay.");
             pw.println("");
             pw.println("  provision-protected-space --owner-credential <PIN> --protected-pin <PIN>");
-            pw.println("      --duress-pin <PIN> --duress-password <PASSWORD> [--reboot-pin <PIN>]");
+            pw.println("      [--duress-pin <PIN> --duress-password <PASSWORD>] [--reboot-pin <PIN>]");
             pw.println("    Creates the protected user as first setup does. Prints its user id.");
             pw.println("");
             pw.println("  dispatch <PIN>");
@@ -474,15 +474,18 @@ class LockSettingsShellCommand extends ShellCommand {
                 }
             }
         }
-        if (owner == null || protectedPin == null || duressPin == null
-                || duressPassword == null) {
+        if (owner == null || protectedPin == null
+                || (duressPin == null) != (duressPassword == null)) {
             getErrPrintWriter().println("missing option, see help");
             return -1;
         }
         try (LockscreenCredential o = LockscreenCredential.createPin(owner);
                 LockscreenCredential p = LockscreenCredential.createPin(protectedPin);
-                LockscreenCredential dp = LockscreenCredential.createPin(duressPin);
-                LockscreenCredential dw = LockscreenCredential.createPassword(duressPassword);
+                LockscreenCredential dp = duressPin == null ? LockscreenCredential.createNone()
+                        : LockscreenCredential.createPin(duressPin);
+                LockscreenCredential dw = duressPassword == null
+                        ? LockscreenCredential.createNone()
+                        : LockscreenCredential.createPassword(duressPassword);
                 LockscreenCredential r = reboot == null ? LockscreenCredential.createNone()
                         : LockscreenCredential.createPin(reboot)) {
             int userId = mLockPatternUtils.provisionProtectedSpace(o, p, dp, dw, r);

@@ -4742,9 +4742,15 @@ public class LockSettingsService extends ILockSettings.Stub {
             LockscreenCredential duressPassword, LockscreenCredential reboot) {
         checkLayoutPin(owner, "owner credential");
         checkLayoutPin(protectedPin, "protected PIN");
-        checkLayoutPin(duressPin, "duress PIN");
-        if (duressPassword == null || !duressPassword.isPassword()) {
-            throw new IllegalArgumentException("duress password missing");
+        // duress is optional: both or neither
+        final boolean withDuress = duressPin != null && !duressPin.isNone();
+        if (withDuress) {
+            checkLayoutPin(duressPin, "duress PIN");
+            if (duressPassword == null || !duressPassword.isPassword()) {
+                throw new IllegalArgumentException("duress password missing");
+            }
+        } else if (duressPassword != null && !duressPassword.isNone()) {
+            throw new IllegalArgumentException("duress password without a duress PIN");
         }
         final boolean withReboot = reboot != null && !reboot.isNone();
         if (withReboot) {
@@ -4755,7 +4761,7 @@ public class LockSettingsService extends ILockSettings.Stub {
         if (protectedPin.equals(owner)) {
             throw new IllegalArgumentException("protected PIN equals the owner's");
         }
-        if (duressPin.equals(owner) || (withReboot && reboot.equals(owner))) {
+        if ((withDuress && duressPin.equals(owner)) || (withReboot && reboot.equals(owner))) {
             throw new IllegalArgumentException("duress or reboot PIN equals the owner's");
         }
         synchronized (mProvisionLock) {
@@ -4768,14 +4774,15 @@ public class LockSettingsService extends ILockSettings.Stub {
                     throw new SecurityException("owner credential didn't match");
                 }
             }
-            return createProtectedSpaceLocked(protectedPin, duressPin, duressPassword,
-                    withReboot ? reboot : null);
+            return createProtectedSpaceLocked(protectedPin, withDuress ? duressPin : null,
+                    withDuress ? duressPassword : null, withReboot ? reboot : null);
         }
     }
 
     @GuardedBy("mProvisionLock")
     private int createProtectedSpaceLocked(LockscreenCredential protectedPin,
-            LockscreenCredential duressPin, LockscreenCredential duressPassword,
+            @Nullable LockscreenCredential duressPin,
+            @Nullable LockscreenCredential duressPassword,
             @Nullable LockscreenCredential reboot) {
         UserInfo user = mUserManager.createUser("Protected",
                 UserManager.USER_TYPE_FULL_SECONDARY, 0);
@@ -4800,9 +4807,12 @@ public class LockSettingsService extends ILockSettings.Stub {
                 }
             }
             setAlternatesAuthorityInternal(user.id);
+            // without duress, any duress record user 0 had set before goes too
             try (LockscreenCredential pin = protectedPin.duplicate();
-                    LockscreenCredential dp = duressPin.duplicate();
-                    LockscreenCredential dw = duressPassword.duplicate()) {
+                    LockscreenCredential dp = duressPin != null ? duressPin.duplicate()
+                            : LockscreenCredential.createNone();
+                    LockscreenCredential dw = duressPin != null ? duressPassword.duplicate()
+                            : LockscreenCredential.createNone()) {
                 duressPasswordHelper.setDuressCredentials(pin, dp, dw, user.id);
             }
             if (reboot != null) {
