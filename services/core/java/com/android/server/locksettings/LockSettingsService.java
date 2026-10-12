@@ -4621,6 +4621,220 @@ public class LockSettingsService extends ILockSettings.Stub {
         }
     }
 
+    /**
+     * The lock screen's single PIN entry. Tries user 0, then the protected user when the device
+     * has one; duress and the reboot credential follow as after any failed check. Returns the
+     * response of the matching user, or the shorter lockout of the two, so a user in lockout
+     * doesn't block the other. {@code matchedUserId[0]} is the user to switch to.
+     */
+    @Override
+    public VerifyCredentialResponse dispatchCredential(LockscreenCredential credential,
+            int[] matchedUserId) {
+        checkReadPermission();
+        if (UserHandle.getCallingUserId() != UserHandle.USER_SYSTEM) {
+            throw new SecurityException("dispatchCredential from user "
+                    + UserHandle.getCallingUserId());
+        }
+        final long identity = Binder.clearCallingIdentity();
+        try {
+            return doDispatchCredential(credential, matchedUserId);
+        } finally {
+            Binder.restoreCallingIdentity(identity);
+            LockscreenCredential.zeroizeIfFromParcel(credential);
+        }
+    }
+
+    @VisibleForTesting
+    VerifyCredentialResponse doDispatchCredential(LockscreenCredential credential,
+            int[] matchedUserId) {
+        if (matchedUserId == null || matchedUserId.length < 1) {
+            throw new IllegalArgumentException("matchedUserId needs one element");
+        }
+        matchedUserId[0] = UserHandle.USER_SYSTEM;
+        final int protectedUser = duressPasswordHelper.getAuthorityUserId();
+        if (protectedUser == UserHandle.USER_SYSTEM || !isUserSecure(protectedUser)) {
+            return doVerifyCredential(credential, Primary, UserHandle.USER_SYSTEM, null, 0);
+        }
+        VerifyCredentialResponse owner = null;
+        boolean otherMatched = false;
+        try {
+            owner = doVerifyCredentialInner(credential, Primary, UserHandle.USER_SYSTEM, null, 0);
+            if (owner.isMatched()) {
+                return owner;
+            }
+            VerifyCredentialResponse other =
+                    doVerifyCredentialInner(credential, Primary, protectedUser, null, 0);
+            if (other.isMatched()) {
+                otherMatched = true;
+                duressPasswordHelper.onVerifyCredentialResult(other, credential, protectedUser);
+                matchedUserId[0] = protectedUser;
+                return other;
+            }
+            return other.getTimeoutAsDuration().compareTo(owner.getTimeoutAsDuration()) < 0
+                    ? other : owner;
+        } finally {
+            if (!otherMatched) {
+                // counts an owner success, or checks duress and then the reboot credential
+                duressPasswordHelper.onVerifyCredentialResult(owner, credential,
+                        UserHandle.USER_SYSTEM);
+            }
+        }
+    }
+
+    /**
+     * Sets up the protected space during first setup: creates the protected user with its PIN,
+     * keeps it from running in the background, makes it the alternates authority and enrols
+     * duress and, if given, the reboot credential under it. Undone if a step fails. Open to
+     * user 0's system UID before the device is provisioned, and to the shell.
+     */
+    @Override
+    public int provisionProtectedSpace(LockscreenCredential ownerCredential,
+            LockscreenCredential protectedPin, LockscreenCredential duressPin,
+            LockscreenCredential duressPassword, LockscreenCredential rebootCredential) {
+        checkWritePermission();
+        final boolean setupCaller = Binder.getCallingUid() == Process.SYSTEM_UID
+                && UserHandle.getCallingUserId() == UserHandle.USER_SYSTEM
+                && Settings.Global.getInt(mContext.getContentResolver(),
+                        Settings.Global.DEVICE_PROVISIONED, 0) == 0;
+        if (!setupCaller && !isTrustedAlternatesCaller()) {
+            throw new SecurityException("provisionProtectedSpace from uid "
+                    + Binder.getCallingUid());
+        }
+        final long identity = Binder.clearCallingIdentity();
+        try {
+            return provisionProtectedSpaceInternal(ownerCredential, protectedPin, duressPin,
+                    duressPassword, rebootCredential);
+        } finally {
+            Binder.restoreCallingIdentity(identity);
+            for (LockscreenCredential c : new LockscreenCredential[] {ownerCredential,
+                    protectedPin, duressPin, duressPassword, rebootCredential}) {
+                if (c != null) {
+                    LockscreenCredential.zeroizeIfFromParcel(c);
+                }
+            }
+        }
+    }
+
+    // every PIN of the layout: digits only, 6 or more (doc 00 decision 2026-10-11)
+    private static void checkLayoutPin(LockscreenCredential credential, String what) {
+        if (credential == null || !credential.isPin() || credential.size() < 6) {
+            throw new IllegalArgumentException(what + " must be a PIN of 6 digits or more");
+        }
+    }
+
+    // one protected space setup at a time
+    private final Object mProvisionLock = new Object();
+
+    private int provisionProtectedSpaceInternal(LockscreenCredential owner,
+            LockscreenCredential protectedPin, LockscreenCredential duressPin,
+            LockscreenCredential duressPassword, LockscreenCredential reboot) {
+        checkLayoutPin(owner, "owner credential");
+        checkLayoutPin(protectedPin, "protected PIN");
+        checkLayoutPin(duressPin, "duress PIN");
+        if (duressPassword == null || !duressPassword.isPassword()) {
+            throw new IllegalArgumentException("duress password missing");
+        }
+        final boolean withReboot = reboot != null && !reboot.isNone();
+        if (withReboot) {
+            checkLayoutPin(reboot, "reboot PIN");
+        }
+        // the helper checks the alternates against the protected PIN and each other; the
+        // owner's PIN is checked here, a match there would never reach the alternates
+        if (protectedPin.equals(owner)) {
+            throw new IllegalArgumentException("protected PIN equals the owner's");
+        }
+        if (duressPin.equals(owner) || (withReboot && reboot.equals(owner))) {
+            throw new IllegalArgumentException("duress or reboot PIN equals the owner's");
+        }
+        synchronized (mProvisionLock) {
+            if (duressPasswordHelper.getAuthorityUserId() != UserHandle.USER_SYSTEM) {
+                throw new IllegalStateException("protected space already set up");
+            }
+            try (LockscreenCredential o = owner.duplicate()) {
+                if (!doVerifyCredential(o, Primary, UserHandle.USER_SYSTEM, null, 0)
+                        .isMatched()) {
+                    throw new SecurityException("owner credential didn't match");
+                }
+            }
+            return createProtectedSpaceLocked(protectedPin, duressPin, duressPassword,
+                    withReboot ? reboot : null);
+        }
+    }
+
+    @GuardedBy("mProvisionLock")
+    private int createProtectedSpaceLocked(LockscreenCredential protectedPin,
+            LockscreenCredential duressPin, LockscreenCredential duressPassword,
+            @Nullable LockscreenCredential reboot) {
+        UserInfo user = mUserManager.createUser(null, UserManager.USER_TYPE_FULL_SECONDARY, 0);
+        if (user == null) {
+            throw new IllegalStateException("couldn't create the protected user");
+        }
+        boolean done = false;
+        // the credential calls below may zeroize what they get, so each gets its own copy
+        try (LockscreenCredential none = LockscreenCredential.createNone()) {
+            mUserManager.setUserRestriction(UserManager.DISALLOW_RUN_IN_BACKGROUND, true,
+                    user.getUserHandle());
+            try (LockscreenCredential pin = protectedPin.duplicate()) {
+                if (!setLockCredential(pin, none, user.id)) {
+                    throw new IllegalStateException("couldn't set the protected PIN");
+                }
+            }
+            setAlternatesAuthorityInternal(user.id);
+            try (LockscreenCredential pin = protectedPin.duplicate();
+                    LockscreenCredential dp = duressPin.duplicate();
+                    LockscreenCredential dw = duressPassword.duplicate()) {
+                duressPasswordHelper.setDuressCredentials(pin, dp, dw, user.id);
+            }
+            if (reboot != null) {
+                try (LockscreenCredential pin = protectedPin.duplicate();
+                        LockscreenCredential r = reboot.duplicate()) {
+                    duressPasswordHelper.setRebootCredential(pin, none, r, user.id);
+                }
+            }
+            // the enrolment checks unlocked its storage; it stays locked until its first entry
+            mStorageManager.lockCeStorage(user.id);
+            mUserManager.setUserRestriction(UserManager.DISALLOW_REMOVE_USER, true,
+                    UserHandle.SYSTEM);
+            // no user switcher anywhere (switching itself doesn't check this), and the
+            // protected user may be opened first after a reboot
+            Settings.Global.putInt(mContext.getContentResolver(),
+                    Settings.Global.USER_SWITCHER_ENABLED, 0);
+            Settings.Global.putInt(mContext.getContentResolver(),
+                    Settings.Global.ALLOW_USER_SWITCHING_WHEN_SYSTEM_USER_LOCKED, 1);
+            done = true;
+            Slog.i(TAG, "protected space set up as user " + user.id);
+            return user.id;
+        } catch (RemoteException e) {
+            throw new IllegalStateException("couldn't lock the protected user's storage", e);
+        } finally {
+            if (!done) {
+                rollBackProtectedSpace(user.id);
+            }
+        }
+    }
+
+    // Undoes a failed setup: the alternates enrolled under the new user go with it, so the
+    // owner isn't left with a duress credential nobody chose for it.
+    private void rollBackProtectedSpace(int userId) {
+        Slog.e(TAG, "protected space setup failed, removing user " + userId);
+        DuressCredentials.delete(mStorage);
+        RebootCredential.delete(mStorage);
+        try {
+            setAlternatesAuthorityInternal(UserHandle.USER_SYSTEM);
+        } catch (RuntimeException e) {
+            Slog.e(TAG, "couldn't hand the alternates back to user 0", e);
+        }
+        mUserManager.setUserRestriction(UserManager.DISALLOW_REMOVE_USER, false,
+                UserHandle.SYSTEM);
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.USER_SWITCHER_ENABLED, 1);
+        Settings.Global.putInt(mContext.getContentResolver(),
+                Settings.Global.ALLOW_USER_SWITCHING_WHEN_SYSTEM_USER_LOCKED, 0);
+        if (!mUserManager.removeUser(userId)) {
+            Slog.e(TAG, "couldn't remove user " + userId);
+        }
+    }
+
     // The alternate credential calls act for the calling user; only trusted callers may name
     // another.
     private static void checkCallerIsUser(int userId) {

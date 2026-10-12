@@ -207,7 +207,7 @@ public class DuressPasswordHelper {
     }
 
     /** The user whose own credential manages the alternate credentials. */
-    int getAuthorityUserId() {
+    public int getAuthorityUserId() {
         synchronized (alternatesLock) {
             return authorityLocked();
         }

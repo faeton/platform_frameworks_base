@@ -96,6 +96,14 @@ class LockSettingsShellCommand extends ShellCommand {
             return handleSetAlternatesAuthority();
         }
 
+        if (cmd.equals("dispatch")) {
+            return handleDispatch();
+        }
+
+        if (cmd.equals("provision-protected-space")) {
+            return handleProvisionProtectedSpace();
+        }
+
         if (cmd.equals("check-non-ce-storage-keys")) {
             return handleCheckNonCeStorageKeys();
         }
@@ -250,6 +258,14 @@ class LockSettingsShellCommand extends ShellCommand {
             pw.println("  set-alternates-authority <USER_ID>");
             pw.println("    Makes USER_ID (a full user with a screen lock, or 0) manage them. Deletes the");
             pw.println("    reboot credential; the duress credentials stay.");
+            pw.println("");
+            pw.println("  provision-protected-space --owner-credential <PIN> --protected-pin <PIN>");
+            pw.println("      --duress-pin <PIN> --duress-password <PASSWORD> [--reboot-pin <PIN>]");
+            pw.println("    Creates the protected user as first setup does. Prints its user id.");
+            pw.println("");
+            pw.println("  dispatch <PIN>");
+            pw.println("    Enters a PIN as the lock screen does: user 0, then the protected user,");
+            pw.println("    then duress and the reboot credential. Prints the matched user.");
             pw.println("");
             pw.println("  set-reboot-credential --owner-credential <CREDENTIAL>");
             pw.println("      [--owner-second-factor <PIN>] --reboot-pin <PIN> | --reboot-password <PASSWORD>");
@@ -439,6 +455,63 @@ class LockSettingsShellCommand extends ShellCommand {
     private void runRemoveCache() {
         mLockPatternUtils.removeCachedUnifiedChallenge(mCurrentUserId);
         getOutPrintWriter().println("Password cached removed for user " + mCurrentUserId);
+    }
+
+    private int handleProvisionProtectedSpace() {
+        String owner = null, protectedPin = null, duressPin = null, duressPassword = null;
+        String reboot = null;
+        String opt;
+        while ((opt = getNextOption()) != null) {
+            switch (opt) {
+                case "--owner-credential" -> owner = getNextArgRequired();
+                case "--protected-pin" -> protectedPin = getNextArgRequired();
+                case "--duress-pin" -> duressPin = getNextArgRequired();
+                case "--duress-password" -> duressPassword = getNextArgRequired();
+                case "--reboot-pin" -> reboot = getNextArgRequired();
+                default -> {
+                    getErrPrintWriter().println("unknown option " + opt);
+                    return -1;
+                }
+            }
+        }
+        if (owner == null || protectedPin == null || duressPin == null
+                || duressPassword == null) {
+            getErrPrintWriter().println("missing option, see help");
+            return -1;
+        }
+        try (LockscreenCredential o = LockscreenCredential.createPin(owner);
+                LockscreenCredential p = LockscreenCredential.createPin(protectedPin);
+                LockscreenCredential dp = LockscreenCredential.createPin(duressPin);
+                LockscreenCredential dw = LockscreenCredential.createPassword(duressPassword);
+                LockscreenCredential r = reboot == null ? LockscreenCredential.createNone()
+                        : LockscreenCredential.createPin(reboot)) {
+            int userId = mLockPatternUtils.provisionProtectedSpace(o, p, dp, dw, r);
+            getOutPrintWriter().println("protected space is user " + userId);
+            return 0;
+        } catch (RuntimeException e) {
+            getErrPrintWriter().println("error: " + e.getMessage());
+            return -1;
+        }
+    }
+
+    private int handleDispatch() {
+        String pin = getNextArg();
+        if (pin == null) {
+            getErrPrintWriter().println("usage: dispatch <PIN>");
+            return -1;
+        }
+        int[] matched = new int[1];
+        try (LockscreenCredential credential = LockscreenCredential.createPin(pin)) {
+            VerifyCredentialResponse response =
+                    mLockPatternUtils.dispatchCredential(credential, matched);
+            if (response.isMatched()) {
+                getOutPrintWriter().println("matched user " + matched[0]);
+                return 0;
+            }
+            getOutPrintWriter().println("no match, timeout "
+                    + response.getTimeoutAsDuration().toMillis() + " ms");
+            return -1;
+        }
     }
 
     private int handleSetAlternatesAuthority() {

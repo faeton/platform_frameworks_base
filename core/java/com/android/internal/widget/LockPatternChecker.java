@@ -159,6 +159,49 @@ public final class LockPatternChecker {
         return task;
     }
 
+    /** Result of {@link #dispatchCredential}. */
+    public interface OnDispatchCallback {
+        /** {@code matchedUserId} is the user to switch to, user 0 when nothing else matched. */
+        void onDispatched(VerifyCredentialResponse response, int matchedUserId);
+
+        /**
+         * The task was cancelled. {@code matchedUserId} is another user whose PIN matched while
+         * the check was running (and whose storage is now unlocked), or -1.
+         */
+        default void onCancelled(int matchedUserId) {}
+    }
+
+    /**
+     * Checks a lock screen entry against user 0 and the protected user asynchronously, see
+     * {@link LockPatternUtils#dispatchCredential}.
+     */
+    public static AsyncTask<?, ?, ?> dispatchCredential(final LockPatternUtils utils,
+            final LockscreenCredential credential, final OnDispatchCallback callback) {
+        final LockscreenCredential credentialCopy = credential.duplicate();
+        final int[] matchedUserId = {0};
+        AsyncTask<Void, Void, VerifyCredentialResponse> task = new AsyncTask<>() {
+            @Override
+            protected VerifyCredentialResponse doInBackground(Void... args) {
+                return utils.dispatchCredential(credentialCopy, matchedUserId);
+            }
+
+            @Override
+            protected void onPostExecute(VerifyCredentialResponse result) {
+                callback.onDispatched(result, matchedUserId[0]);
+                credentialCopy.zeroize();
+            }
+
+            @Override
+            protected void onCancelled(VerifyCredentialResponse result) {
+                boolean otherUser = result != null && result.isMatched() && matchedUserId[0] != 0;
+                callback.onCancelled(otherUser ? matchedUserId[0] : -1);
+                credentialCopy.zeroize();
+            }
+        };
+        task.execute();
+        return task;
+    }
+
     /**
      * Perform a lockscreen credential verification explicitly on a managed profile with unified
      * challenge, using the parent user's credential.

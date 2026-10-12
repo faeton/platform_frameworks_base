@@ -11,8 +11,10 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import android.platform.test.annotations.Presubmit;
 
@@ -26,6 +28,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 
 /** Duress and reboot credentials, with the real helper and actions that only count calls. */
@@ -557,5 +560,97 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         // the test's uid belongs to user 0, so it can't act for another user
         assertThrows(SecurityException.class, () -> mService.hasRebootCredential(
                 newPin(PROTECTED), SECONDARY_USER_ID));
+    }
+
+    // dispatch: the lock screen's single PIN entry, run through the service with the mocked
+    // helper standing for the layout
+
+    private DuressPasswordHelper protectedLayout() {
+        mService.initializeSyntheticPassword(SECONDARY_USER_ID);
+        assertTrue(mService.setLockCredential(newPin(PROTECTED), nonePassword(),
+                SECONDARY_USER_ID));
+        DuressPasswordHelper mock = mService.duressPasswordHelper;
+        reset(mock);
+        when(mock.getAuthorityUserId()).thenReturn(SECONDARY_USER_ID);
+        return mock;
+    }
+
+    private VerifyCredentialResponse dispatch(String pin, int[] matched) {
+        return mService.doDispatchCredential(newPin(pin), matched);
+    }
+
+    @Test
+    public void dispatch_withoutLayoutChecksTheOwnerOnly() {
+        DuressPasswordHelper mock = mService.duressPasswordHelper;
+        reset(mock);
+        int[] matched = {-1};
+
+        assertThat(dispatch(OWNER, matched).isMatched()).isTrue();
+        assertThat(matched[0]).isEqualTo(PRIMARY_USER_ID);
+        assertThat(dispatch("0000", matched).isMatched()).isFalse();
+        verify(mock).onVerifyCredentialResult(argThat(r -> !r.isMatched()), any(),
+                eq(PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void dispatch_protectedPinOpensTheProtectedUser() {
+        DuressPasswordHelper mock = protectedLayout();
+        int[] matched = {-1};
+
+        assertThat(dispatch(PROTECTED, matched).isMatched()).isTrue();
+        assertThat(matched[0]).isEqualTo(SECONDARY_USER_ID);
+        verify(mock).onVerifyCredentialResult(argThat(r -> r.isMatched()), any(),
+                eq(SECONDARY_USER_ID));
+        // a match is not a failed owner entry: no duress or reboot check
+        verify(mock, never()).onVerifyCredentialResult(any(), any(), eq(PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void dispatch_ownerPinStillOpensTheOwner() {
+        DuressPasswordHelper mock = protectedLayout();
+        int[] matched = {-1};
+
+        assertThat(dispatch(OWNER, matched).isMatched()).isTrue();
+        assertThat(matched[0]).isEqualTo(PRIMARY_USER_ID);
+        verify(mock).onVerifyCredentialResult(argThat(r -> r.isMatched()), any(),
+                eq(PRIMARY_USER_ID));
+        verify(mock, never()).onVerifyCredentialResult(any(), any(), eq(SECONDARY_USER_ID));
+    }
+
+    @Test
+    public void dispatch_wrongPinRunsTheAlternateChecksOnce() {
+        DuressPasswordHelper mock = protectedLayout();
+        int[] matched = {-1};
+
+        assertThat(dispatch("0000", matched).isMatched()).isFalse();
+        assertThat(matched[0]).isEqualTo(PRIMARY_USER_ID);
+        verify(mock).onVerifyCredentialResult(argThat(r -> !r.isMatched()), any(),
+                eq(PRIMARY_USER_ID));
+        verify(mock, never()).onVerifyCredentialResult(any(), any(), eq(SECONDARY_USER_ID));
+    }
+
+    @Test
+    public void dispatch_ownerLockoutDoesNotBlockTheProtectedUser() {
+        protectedLayout();
+        mInjector.setTimeSinceBoot(Duration.ofSeconds(10));
+        for (int i = 0; i < 5; i++) {
+            mService.verifyCredential(newPin("000" + i), PRIMARY_USER_ID, 0);
+        }
+        assertThat(mService.verifyCredential(newPin("0009"), PRIMARY_USER_ID, 0)
+                .getTimeoutAsDuration().isPositive()).isTrue();
+        int[] matched = {-1};
+
+        // a wrong entry reports the protected user's shorter lockout, so the pad stays usable
+        assertThat(dispatch("0008", matched).getTimeoutAsDuration()).isEqualTo(Duration.ZERO);
+        assertThat(dispatch(PROTECTED, matched).isMatched()).isTrue();
+        assertThat(matched[0]).isEqualTo(SECONDARY_USER_ID);
+    }
+
+    @Test
+    public void dispatch_onlyUserZeroMayCallIt() {
+        // the test's uid belongs to user 0; the binder call is refused from other users, the
+        // check itself needs the keyguard permission
+        int[] matched = {-1};
+        assertThat(mService.dispatchCredential(newPin(OWNER), matched).isMatched()).isTrue();
     }
 }

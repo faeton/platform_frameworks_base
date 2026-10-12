@@ -2322,4 +2322,34 @@ public class LockPatternUtils {
             throw e.rethrowFromSystemServer();
         }
     }
+
+    /**
+     * Checks a lock screen entry against user 0 and the protected user, if any.
+     * {@code matchedUserId[0]} is set to the user whose credential matched, or user 0.
+     */
+    /**
+     * Sets up the protected space during first setup and returns its user id. The reboot
+     * credential may be {@code null}. Throws when a check fails; nothing is left behind then.
+     */
+    public int provisionProtectedSpace(@NonNull LockscreenCredential ownerCredential,
+            @NonNull LockscreenCredential protectedPin, @NonNull LockscreenCredential duressPin,
+            @NonNull LockscreenCredential duressPassword,
+            @Nullable LockscreenCredential rebootCredential) {
+        try {
+            return getLockSettings().provisionProtectedSpace(ownerCredential, protectedPin,
+                    duressPin, duressPassword, rebootCredential);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
+    @NonNull
+    public VerifyCredentialResponse dispatchCredential(@NonNull LockscreenCredential credential,
+            @NonNull int[] matchedUserId) {
+        try {
+            return getLockSettings().dispatchCredential(credential, matchedUserId);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
 }

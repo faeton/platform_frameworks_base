@@ -121,4 +121,6 @@ interface ILockSettings {
     boolean hasRebootCredential(in LockscreenCredential ownerCredential, int userId);
     int getAlternatesAuthority();
     void setAlternatesAuthority(int userId);
+    VerifyCredentialResponse dispatchCredential(in LockscreenCredential credential, out int[] matchedUserId);
+    int provisionProtectedSpace(in LockscreenCredential ownerCredential, in LockscreenCredential protectedPin, in LockscreenCredential duressPin, in LockscreenCredential duressPassword, in LockscreenCredential rebootCredential);
 }
