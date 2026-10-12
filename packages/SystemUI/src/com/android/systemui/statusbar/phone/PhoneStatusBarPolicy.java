@@ -522,7 +522,9 @@ public class PhoneStatusBarPolicy
     // The protected space: a full user other than 0 while user 0 learns USER_NULL from the
     // authority query (only once a protected space exists). Its user can turn the icon off.
     private boolean isProtectedSpaceMarked(int userId) {
-        if (userId == UserHandle.USER_SYSTEM || userId == UserHandle.USER_NULL) {
+        // full users only: profiles keep their own badge
+        if (userId == UserHandle.USER_SYSTEM || userId == UserHandle.USER_NULL
+                || mUserManager.isProfile(userId)) {
             return false;
         }
         try {
