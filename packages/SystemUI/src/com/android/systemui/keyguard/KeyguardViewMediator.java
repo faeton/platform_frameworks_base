@@ -50,6 +50,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
+import android.app.ActivityManager;
 import android.app.AlarmManager;
 import android.app.BroadcastOptions;
 import android.app.IActivityTaskManager;
@@ -79,6 +80,7 @@ import android.os.IRemoteCallback;
 import android.os.Looper;
 import android.os.Message;
 import android.os.PowerManager;
+import android.os.AsyncTask;
 import android.os.RemoteException;
 import android.os.SystemProperties;
 import android.os.Trace;
@@ -1977,7 +1979,30 @@ public class KeyguardViewMediator implements CoreStartable,
         mKeyguardStateController.notifyKeyguardGoingAway(false);
         mUpdateMonitor.dispatchKeyguardGoingAway(false);
 
+        returnToUserZeroFromProtectedSpace();
         notifyStartedGoingToSleep();
+    }
+
+    // With a protected space the lock screen is always user 0's: when the protected user's
+    // screen goes off, switch back. It can't run in the background, so this also stops it and
+    // locks its storage again.
+    private void returnToUserZeroFromProtectedSpace() {
+        final int current = mSelectedUserInteractor.getSelectedUserId();
+        if (current == UserHandle.USER_SYSTEM) {
+            return;
+        }
+        AsyncTask.execute(() -> {
+            try {
+                // answers USER_NULL to user 0's processes only when a protected space exists
+                if (mLockPatternUtils.getAlternatesAuthority() != UserHandle.USER_NULL) {
+                    return;
+                }
+                Log.i(TAG, "screen off in user " + current + ", back to user 0");
+                ActivityManager.getService().switchUser(UserHandle.USER_SYSTEM);
+            } catch (RemoteException | RuntimeException e) {
+                Log.e(TAG, "switch back to user 0 failed", e);
+            }
+        });
     }
 
     /**

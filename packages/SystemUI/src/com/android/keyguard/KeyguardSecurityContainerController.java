@@ -855,6 +855,15 @@ public class KeyguardSecurityContainerController extends ViewController<Keyguard
             getCurrentSecurityController(controller -> controller.onResume(reason));
         }
 
+        // this user's PIN was just entered on user 0's lock screen and verified there: finish as
+        // if it had been entered here, including SIM, secure lock device and admin steps
+        int selectedUserId = mSelectedUserInteractor.getSelectedUserId();
+        if (mUpdateMonitor.consumeDispatchedUser(selectedUserId)) {
+            Log.i(TAG, "user " + selectedUserId + " verified on user 0's lock screen");
+            showNextSecurityScreenOrFinish(true /* authenticated */, selectedUserId,
+                    false /* bypassSecondaryLockScreen */, mCurrentSecurityMode);
+        }
+
         SecurityMode trueCurrentSecurityMode = mSecurityModel.getSecurityMode(
                 mSelectedUserInteractor.getSelectedUserId());
 

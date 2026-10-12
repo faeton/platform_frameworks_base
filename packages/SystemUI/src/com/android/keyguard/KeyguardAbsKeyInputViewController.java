@@ -25,10 +25,13 @@ import static com.android.internal.widget.LockDomain.Secondary;
 import static com.android.keyguard.KeyguardAbsKeyInputView.MINIMUM_PASSWORD_LENGTH_BEFORE_REPORT;
 import static com.android.keyguard.KeyguardUpdateMonitor.BSF_TAG;
 
+import android.app.ActivityManager;
 import android.content.res.ColorStateList;
 import android.os.AsyncTask;
 import android.os.CountDownTimer;
+import android.os.RemoteException;
 import android.os.SystemClock;
+import android.os.UserHandle;
 import android.uilatencystats.UiLatencyStatsManager;
 import android.util.Log;
 import android.util.PluralsMessageFormatter;
@@ -256,7 +259,14 @@ public abstract class KeyguardAbsKeyInputViewController<T extends KeyguardAbsKey
             if (isValidPassword) {
                 getKeyguardSecurityCallback()
                         .reportUnlockAttempt(userId, mLockDomain, false, timeout, isDuplicate);
-                if (timeout.isPositive()) {
+                if (timeout.isPositive() && dispatchesHere()) {
+                    LockoutMessageModel lockout = BouncerMessageStrings.INSTANCE
+                            .primaryAuthLockedOut(AuthenticationMethodModel.Password.INSTANCE,
+                                    (long) Math.ceil(timeout.toMillis() / 1000.0));
+                    mMessageAreaController.setMessage(PluralsMessageFormatter.format(
+                            mView.getResources(), lockout.primaryFormatterArgs(),
+                            lockout.getPrimaryMessage()), /* animate= */ false);
+                } else if (timeout.isPositive()) {
                     Duration lockoutEndTime = mLockPatternUtils.getLockoutEndTime(userId, mLockDomain);
                     if (mLockDomain == Primary) {
                         handleAttemptLockout(lockoutEndTime);
@@ -268,6 +278,44 @@ public abstract class KeyguardAbsKeyInputViewController<T extends KeyguardAbsKey
             }
             startErrorAnimation();
         }
+    }
+
+    /**
+     * The entry was the protected user's PIN, already verified. Switch to that user; its bouncer
+     * then completes without asking again (KeyguardSecurityContainerController#onResume).
+     */
+    private void onOtherUserMatched(int userId) {
+        mBouncerHapticPlayer.playAuthenticationFeedback(/* authenticationSucceeded = */true);
+        mDismissing = true;
+        mView.resetPasswordText(false /* animate */, false /* announce */);
+        getKeyguardSecurityCallback().reportUnlockAttempt(userId, mLockDomain, true,
+                Duration.ZERO, false /* isDuplicate */);
+        switchToMatchedUser(userId);
+    }
+
+    private void switchToMatchedUser(int userId) {
+        mKeyguardUpdateMonitor.setDispatchedUser(userId);
+        Log.i(TAG, "PIN entry matched user " + userId + ", switching");
+        AsyncTask.execute(() -> {
+            boolean switched = false;
+            try {
+                switched = ActivityManager.getService().switchUser(userId);
+            } catch (RemoteException | RuntimeException e) {
+                Log.e(TAG, "switch to user " + userId + " failed", e);
+            }
+            if (!switched) {
+                Log.e(TAG, "switch to user " + userId + " refused");
+                mKeyguardUpdateMonitor.clearDispatchedUser();
+                mView.post(() -> mDismissing = false);
+            }
+        });
+    }
+
+    // User 0's pad checks user 0 and the protected user, each with its own lockout. The pad
+    // stays usable during a lockout so the other user and duress can still be entered.
+    private boolean dispatchesHere() {
+        return mSelectedUserInteractor.getSelectedUserId() == UserHandle.USER_SYSTEM
+                && mLockDomain == Primary;
     }
 
     protected void startErrorAnimation() { /* no-op */ }
@@ -297,6 +345,41 @@ public abstract class KeyguardAbsKeyInputViewController<T extends KeyguardAbsKey
         mLatencyTracker.onActionStart(ACTION_CHECK_CREDENTIAL_UNLOCKED);
 
         mKeyguardUpdateMonitor.setCredentialAttempted();
+        if (userId == UserHandle.USER_SYSTEM && mLockDomain == Primary) {
+            // user 0's pad also opens the protected user, if the device has one
+            mPendingLockCheck = LockPatternChecker.dispatchCredential(mLockPatternUtils, password,
+                    new LockPatternChecker.OnDispatchCallback() {
+                        @Override
+                        public void onDispatched(VerifyCredentialResponse response,
+                                int matchedUserId) {
+                            mLatencyTracker.onActionEnd(ACTION_CHECK_CREDENTIAL);
+                            mLatencyTracker.onActionEnd(ACTION_CHECK_CREDENTIAL_UNLOCKED);
+                            mView.setPasswordEntryInputEnabled(true);
+                            mPendingLockCheck = null;
+                            if (response.isMatched() && matchedUserId != userId) {
+                                onOtherUserMatched(matchedUserId);
+                            } else {
+                                onPasswordChecked(userId, response.isMatched(),
+                                        response.getTimeout(), true /* isValidPassword */,
+                                        lockscreenIndicateDuplicateGuesses()
+                                                && response.isCredAlreadyTried());
+                            }
+                            password.zeroize();
+                        }
+
+                        @Override
+                        public void onCancelled(int matchedUserId) {
+                            mLatencyTracker.onActionEnd(ACTION_CHECK_CREDENTIAL_UNLOCKED);
+                            password.zeroize();
+                            if (matchedUserId >= 0) {
+                                // the bouncer went away after the other user was verified:
+                                // still switch, so that user isn't left unlocked behind user 0
+                                switchToMatchedUser(matchedUserId);
+                            }
+                        }
+                    });
+            return;
+        }
         mPendingLockCheck = mLockPatternChecker.checkCredential(
                 mLockPatternUtils,
                 mLockDomain,
@@ -366,7 +449,7 @@ public abstract class KeyguardAbsKeyInputViewController<T extends KeyguardAbsKey
         // primary bouncer already open.
         Duration lockoutEndTime = mLockPatternUtils.getLockoutEndTime(
                 mSelectedUserInteractor.getSelectedUserId(), mLockDomain);
-        if (shouldLockout(lockoutEndTime)) {
+        if (shouldLockout(lockoutEndTime) && !dispatchesHere()) {
             handleAttemptLockout(lockoutEndTime);
         }
     }

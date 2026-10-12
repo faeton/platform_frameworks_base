@@ -94,6 +94,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.os.Trace;
 import android.os.UserHandle;
 import android.os.UserManager;
@@ -1554,6 +1555,32 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
     public boolean getIsFaceAuthenticated() {
         return getFaceAuthInteractor() != null
                 && getFaceAuthInteractor().isAuthenticated().getValue();
+    }
+
+    // The lock screen's PIN entry matched this other user and the switch to it is under way.
+    // Its bouncer then completes without asking again. Single use, only for a short while, and
+    // dropped when a switch goes to any other user or the switch fails.
+    private int mDispatchedUserId = UserHandle.USER_NULL;
+    private long mDispatchedAtMs;
+    private static final long DISPATCHED_USER_VALID_MS = 15_000;
+
+    /** Marks {@code userId} as verified by the PIN entry of user 0's lock screen. */
+    public synchronized void setDispatchedUser(int userId) {
+        mDispatchedUserId = userId;
+        mDispatchedAtMs = SystemClock.elapsedRealtime();
+    }
+
+    public synchronized void clearDispatchedUser() {
+        mDispatchedUserId = UserHandle.USER_NULL;
+    }
+
+    /** Whether {@code userId}'s PIN was just entered on user 0's lock screen; takes the mark. */
+    public synchronized boolean consumeDispatchedUser(int userId) {
+        if (mDispatchedUserId == UserHandle.USER_NULL || mDispatchedUserId != userId) {
+            return false;
+        }
+        mDispatchedUserId = UserHandle.USER_NULL;
+        return SystemClock.elapsedRealtime() - mDispatchedAtMs < DISPATCHED_USER_VALID_MS;
     }
 
     public boolean getUserCanSkipBouncer(int userId) {
@@ -3542,6 +3569,11 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
     void handleUserSwitching(int userId, Runnable resultCallback) {
         mLogger.logUserSwitching(userId, "from UserTracker");
         Assert.isMainThread();
+        synchronized (this) {
+            if (mDispatchedUserId != userId) {
+                mDispatchedUserId = UserHandle.USER_NULL;
+            }
+        }
         setForceIsDismissibleKeyguard(false);
         clearFingerprintRecognized();
         boolean trustUsuallyManaged = mTrustManager.isTrustUsuallyManaged(userId);
