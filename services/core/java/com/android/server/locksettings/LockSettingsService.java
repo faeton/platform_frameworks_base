@@ -4748,8 +4748,8 @@ public class LockSettingsService extends ILockSettings.Stub {
     }
 
     // With a protected space, user 0 is checked first at the lock screen, so a PIN that user 0
-    // and the protected user share opens user 0, and one user 0 shares with an alternate never
-    // reaches it. Such a change is refused. The check against the other user's PIN goes through
+    // and the protected user share opens user 0, and an alternate that either of them shares
+    // never runs. Such a change is refused. The check against the other user's PIN goes through
     // its rate limiters like a lock screen attempt (doc 04 decision 2026-10-13).
     private void checkLayoutCollision(LockscreenCredential credential, LockDomain lockDomain,
             int userId) {
@@ -4758,12 +4758,24 @@ public class LockSettingsService extends ILockSettings.Stub {
                 || (userId != UserHandle.USER_SYSTEM && userId != authority)) {
             return;
         }
-        if (userId == UserHandle.USER_SYSTEM
-                && duressPasswordHelper.isAlternateCredential(credential)) {
+        // duress and reboot only run after both users failed to match
+        if (duressPasswordHelper.isAlternateCredential(credential)) {
             throw new IllegalArgumentException("collision: alternate credential");
         }
         final int other = userId == UserHandle.USER_SYSTEM ? authority : UserHandle.USER_SYSTEM;
         if (isUserSecure(other) && matchesPrimaryCredential(credential, other)) {
+            throw new IllegalArgumentException("collision: other space PIN");
+        }
+    }
+
+    // A duress or reboot PIN the protected user enrols must differ from user 0's PIN as well;
+    // the helper already compares it with the protected user's own.
+    void checkAlternateAgainstOwner(LockscreenCredential credential) {
+        if (duressPasswordHelper.getAuthorityUserId() == UserHandle.USER_SYSTEM
+                || !credential.isPin() || !isUserSecure(UserHandle.USER_SYSTEM)) {
+            return;
+        }
+        if (matchesPrimaryCredential(credential, UserHandle.USER_SYSTEM)) {
             throw new IllegalArgumentException("collision: other space PIN");
         }
     }

@@ -718,5 +718,21 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         var e = assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
                 newPin(DURESS_PIN), newPin(OWNER), PRIMARY_USER_ID));
         assertThat(e).hasMessageThat().startsWith("collision:");
+        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                newPin(DURESS_PIN), nonePassword(), SECONDARY_USER_ID));
+    }
+
+    @Test
+    public void layout_alternatesDifferFromTheOwnersPin() {
+        makeSecondaryTheAuthority();
+        protectedSpaceWithLength(OWNER.length());
+        var e = assertThrows(IllegalArgumentException.class, () -> mHelper.setRebootCredential(
+                newPin(PROTECTED), nonePassword(), newPin(OWNER), SECONDARY_USER_ID));
+        assertThat(e).hasMessageThat().isEqualTo("collision: other space PIN");
+        assertThrows(IllegalArgumentException.class, () -> mHelper.setDuressCredentials(
+                newPin(PROTECTED), newPin(OWNER), newPassword(DURESS_PASSWORD),
+                SECONDARY_USER_ID));
+        mHelper.setRebootCredential(newPin(PROTECTED), nonePassword(), newPin(REBOOT),
+                SECONDARY_USER_ID);
     }
 }

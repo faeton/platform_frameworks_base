@@ -340,6 +340,7 @@ public class DuressPasswordHelper {
         DuressCredential.validate(pin, CREDENTIAL_TYPE_PIN);
         DuressCredential.validate(password, CREDENTIAL_TYPE_PASSWORD);
         lockSettingsService.checkLayoutPinLength(pin);
+        lockSettingsService.checkAlternateAgainstOwner(pin);
 
         synchronized (alternatesLock) {
             checkUnchangedLocked(userId, changesBefore);
@@ -436,6 +437,7 @@ public class DuressPasswordHelper {
         if (type == CREDENTIAL_TYPE_PASSWORD && getAuthorityUserId() != UserHandle.USER_SYSTEM) {
             throw new IllegalArgumentException("the reboot credential must be a PIN");
         }
+        lockSettingsService.checkAlternateAgainstOwner(credential);
 
         if (sameAsOwner) {
             throw new IllegalArgumentException(COLLISION_OWNER);
@@ -475,7 +477,23 @@ public class DuressPasswordHelper {
     /** True for the duress PIN or password and for the reboot credential. */
     boolean isAlternateCredential(LockscreenCredential credential) {
         synchronized (alternatesLock) {
-            return isDuressCredential(credential) || isRebootCredential(credential);
+            boolean duress;
+            try {
+                duress = isDuressCredential(credential);
+            } catch (IllegalStateException e) {
+                // an unreadable record can't collide and mustn't block a PIN change
+                Slog.e(TAG, e.getMessage());
+                duress = false;
+            }
+            if (duress) {
+                return true;
+            }
+            try {
+                return isRebootCredential(credential);
+            } catch (IllegalStateException e) {
+                Slog.e(TAG, e.getMessage());
+                return false;
+            }
         }
     }
 
