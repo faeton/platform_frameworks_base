@@ -475,7 +475,7 @@ public class DuressPasswordHelper {
     }
 
     /** True for the duress PIN or password and for the reboot credential. */
-    boolean isAlternateCredential(LockscreenCredential credential) {
+    protected boolean isAlternateCredential(LockscreenCredential credential) {
         synchronized (alternatesLock) {
             boolean duress;
             try {

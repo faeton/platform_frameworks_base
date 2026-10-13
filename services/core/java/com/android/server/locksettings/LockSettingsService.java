@@ -4780,8 +4780,8 @@ public class LockSettingsService extends ILockSettings.Stub {
         }
     }
 
-    // Checks a credential without unlocking storage. Only a known wrong guess counts as no
-    // match: while the other user is rate-limited the change is refused, so it can't slip in.
+    // Checks a credential without unlocking storage. While the other user is rate-limited the
+    // change is refused, so a shared PIN can't slip in.
     private boolean matchesPrimaryCredential(LockscreenCredential credential, int userId) {
         synchronized (mSpManager) {
             final long protectorId = getCurrentLskfBasedProtectorId(userId, Primary);
@@ -4803,7 +4803,10 @@ public class LockSettingsService extends ILockSettings.Stub {
                 if (response.isMatched()) {
                     return true;
                 }
-                if (!response.isCredCertainlyIncorrect()) {
+                // a wait without a wrong-key answer means the hardware didn't compare it;
+                // Gatekeeper reports a plain mismatch as an error without a wait
+                if (response.hasTimeout() && response.getTimeoutAsDuration().isPositive()
+                        && !response.isCredCertainlyIncorrect()) {
                     throw new IllegalStateException("can't compare the PIN now, try later");
                 }
                 return false;
