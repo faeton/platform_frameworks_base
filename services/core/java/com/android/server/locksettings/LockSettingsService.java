@@ -2213,6 +2213,7 @@ public class LockSettingsService extends ILockSettings.Stub {
         try {
             credential.validateBasicRequirements();
             checkLayoutCredential(credential, lockDomain, userId);
+            checkLayoutCollision(credential, lockDomain, userId);
 
             enforceFrpNotActive();
             // When changing credential for profiles with unified challenge, some callers
@@ -4743,6 +4744,49 @@ public class LockSettingsService extends ILockSettings.Stub {
             throw new IllegalArgumentException("the screen lock must stay a PIN");
         }
         checkLayoutPinLength(credential);
+    }
+
+    // With a protected space, user 0 is checked first at the lock screen, so a PIN that user 0
+    // and the protected user share opens user 0, and one user 0 shares with an alternate never
+    // reaches it. Such a change is refused. The check against the other user's PIN goes through
+    // its rate limiters like a lock screen attempt (doc 04 decision 2026-10-13).
+    private void checkLayoutCollision(LockscreenCredential credential, LockDomain lockDomain,
+            int userId) {
+        final int authority = duressPasswordHelper.getAuthorityUserId();
+        if (authority == UserHandle.USER_SYSTEM || lockDomain != Primary || !credential.isPin()
+                || (userId != UserHandle.USER_SYSTEM && userId != authority)) {
+            return;
+        }
+        if (userId == UserHandle.USER_SYSTEM
+                && duressPasswordHelper.isAlternateCredential(credential)) {
+            throw new IllegalArgumentException("collision: alternate credential");
+        }
+        final int other = userId == UserHandle.USER_SYSTEM ? authority : UserHandle.USER_SYSTEM;
+        if (isUserSecure(other) && matchesPrimaryCredential(credential, other)) {
+            throw new IllegalArgumentException("collision: other space PIN");
+        }
+    }
+
+    // Checks a credential without unlocking anything. A user in lockout counts as no match.
+    private boolean matchesPrimaryCredential(LockscreenCredential credential, int userId) {
+        synchronized (mSpManager) {
+            final long protectorId = getCurrentLskfBasedProtectorId(userId, Primary);
+            final LskfIdentifier lskfId = new LskfIdentifier(userId, protectorId);
+            if (mSoftwareRateLimiter.apply(lskfId, credential).code
+                    != SoftwareRateLimiterResult.CONTINUE_TO_HARDWARE) {
+                return false;
+            }
+            AuthenticationResult result = mSpManager.unlockLskfBasedProtector(
+                    getGateKeeperService(), protectorId, credential, Primary, userId, null);
+            try {
+                return reportResultToSoftwareRateLimiter(result.response, lskfId, credential)
+                        .isMatched();
+            } finally {
+                if (result.syntheticPassword != null) {
+                    result.syntheticPassword.zeroize();
+                }
+            }
+        }
     }
 
     // With a protected space every new PIN, of any user and of the alternates, has the owner's

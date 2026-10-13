@@ -686,4 +686,37 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         assertTrue(mService.setLockCredential(nonePassword(), newPin("12345678"),
                 PRIMARY_USER_ID));
     }
+
+    @Test
+    public void layout_rebootCredentialIsAPin() {
+        makeSecondaryTheAuthority();
+        assertThrows(IllegalArgumentException.class, () -> mHelper.setRebootCredential(
+                newPin(PROTECTED), nonePassword(), newPassword("reboot-pw"), SECONDARY_USER_ID));
+        mHelper.setRebootCredential(newPin(PROTECTED), nonePassword(), newPin(REBOOT),
+                SECONDARY_USER_ID);
+    }
+
+    @Test
+    public void layout_spacesKeepDifferentPins() {
+        mService.initializeSyntheticPassword(SECONDARY_USER_ID);
+        assertTrue(mService.setLockCredential(newPin(PROTECTED), nonePassword(),
+                SECONDARY_USER_ID));
+        protectedSpaceWithLength(OWNER.length());
+
+        var e = assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                newPin(PROTECTED), newPin(OWNER), PRIMARY_USER_ID));
+        assertThat(e).hasMessageThat().startsWith("collision:");
+        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                newPin(OWNER), newPin(PROTECTED), SECONDARY_USER_ID));
+        assertTrue(mService.setLockCredential(newPin("333300"), newPin(OWNER), PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void layout_ownerCantTakeAnAlternate() {
+        protectedSpaceWithLength(OWNER.length());
+        when(mService.duressPasswordHelper.isAlternateCredential(any())).thenReturn(true);
+        var e = assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                newPin(DURESS_PIN), newPin(OWNER), PRIMARY_USER_ID));
+        assertThat(e).hasMessageThat().startsWith("collision:");
+    }
 }

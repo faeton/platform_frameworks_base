@@ -432,6 +432,10 @@ public class DuressPasswordHelper {
         }
         DuressCredential.validate(credential, type);
         lockSettingsService.checkLayoutPinLength(credential);
+        // with a protected space the lock screen is a PIN pad, so a password couldn't be typed
+        if (type == CREDENTIAL_TYPE_PASSWORD && getAuthorityUserId() != UserHandle.USER_SYSTEM) {
+            throw new IllegalArgumentException("the reboot credential must be a PIN");
+        }
 
         if (sameAsOwner) {
             throw new IllegalArgumentException(COLLISION_OWNER);
@@ -465,6 +469,13 @@ public class DuressPasswordHelper {
         synchronized (alternatesLock) {
             checkUnchangedLocked(userId, changesBefore);
             return RebootCredential.maybeGet(lockSettingsStorage) != null;
+        }
+    }
+
+    /** True for the duress PIN or password and for the reboot credential. */
+    boolean isAlternateCredential(LockscreenCredential credential) {
+        synchronized (alternatesLock) {
+            return isDuressCredential(credential) || isRebootCredential(credential);
         }
     }
 
