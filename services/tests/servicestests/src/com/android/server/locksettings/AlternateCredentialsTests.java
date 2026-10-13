@@ -36,10 +36,10 @@ import java.util.concurrent.CountDownLatch;
 @Presubmit
 @RunWith(AndroidJUnit4.class)
 public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
-    private static final String OWNER = "1111";
-    private static final String DURESS_PIN = "9999";
+    private static final String OWNER = "111100";
+    private static final String DURESS_PIN = "999900";
     private static final String DURESS_PASSWORD = "duress-pw";
-    private static final String REBOOT = "5555";
+    private static final String REBOOT = "555500";
 
     private int mWipes;
     private int mReboots;
@@ -103,7 +103,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     public void rebootCredential_otherCredentialsDoNothing() {
         setReboot(REBOOT);
 
-        enter(newPin("0000"), PRIMARY_USER_ID);
+        enter(newPin("000000"), PRIMARY_USER_ID);
         // same digits as a password: matching is type-specific
         enter(newPassword(REBOOT), PRIMARY_USER_ID);
         // a matching credential never reaches the background check
@@ -170,7 +170,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
 
         mHelper.onVerifyCredentialResult(VerifyCredentialResponse.credIncorrect(), newPin(REBOOT),
                 PRIMARY_USER_ID);
-        mHelper.onVerifyCredentialResult(VerifyCredentialResponse.OK, newPin("2222"),
+        mHelper.onVerifyCredentialResult(VerifyCredentialResponse.OK, newPin("222200"),
                 SECONDARY_USER_ID);
         hold.countDown();
         flushHelper();
@@ -197,7 +197,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
 
     @Test
     public void enrolment_wrongOwnerCredential() {
-        assertThrows(SecurityException.class, () -> mHelper.setRebootCredential(newPin("0000"),
+        assertThrows(SecurityException.class, () -> mHelper.setRebootCredential(newPin("000000"),
                 nonePassword(), newPin(REBOOT), PRIMARY_USER_ID));
         assertThat(mHelper.hasRebootCredential(newPin(OWNER), PRIMARY_USER_ID)).isFalse();
     }
@@ -251,7 +251,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     public void unrelatedCredentialChanges_keepRebootCredential() {
         setReboot(REBOOT);
 
-        mHelper.onLockCredentialChanged(newPin("4321"), Primary, PRIMARY_USER_ID);
+        mHelper.onLockCredentialChanged(newPin("432100"), Primary, PRIMARY_USER_ID);
         mHelper.onLockCredentialChanged(nonePassword(), Secondary, PRIMARY_USER_ID);
         // another user's credential, even an equal one
         mHelper.onLockCredentialChanged(newPin(REBOOT), Primary, SECONDARY_USER_ID);
@@ -291,7 +291,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         assertThat(mWipes).isEqualTo(1);
 
         // an owner change never fails because of it, and removing the lock deletes it
-        mHelper.onLockCredentialChanged(newPin("4321"), Primary, PRIMARY_USER_ID);
+        mHelper.onLockCredentialChanged(newPin("432100"), Primary, PRIMARY_USER_ID);
         mHelper.onLockCredentialChanged(nonePassword(), Primary, PRIMARY_USER_ID);
         assertThat(mStorage.getString("reboot_credential", null, PRIMARY_USER_ID)).isNull();
     }
@@ -373,11 +373,11 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         DuressPasswordHelper mock = mService.duressPasswordHelper;
         reset(mock);
 
-        assertTrue(mService.setLockCredential(newPin("4321"), newPin(OWNER), PRIMARY_USER_ID));
+        assertTrue(mService.setLockCredential(newPin("432100"), newPin(OWNER), PRIMARY_USER_ID));
         verify(mock).onLockCredentialChanging(PRIMARY_USER_ID);
         verify(mock).onLockCredentialChanged(any(), eq(Primary), eq(PRIMARY_USER_ID));
 
-        assertTrue(mService.setLockCredential(nonePassword(), newPin("4321"), PRIMARY_USER_ID));
+        assertTrue(mService.setLockCredential(nonePassword(), newPin("432100"), PRIMARY_USER_ID));
         verify(mock).onLockCredentialChanged(argThat(c -> c.getType() == CREDENTIAL_TYPE_NONE),
                 eq(Primary), eq(PRIMARY_USER_ID));
     }
@@ -387,7 +387,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         DuressPasswordHelper mock = mService.duressPasswordHelper;
         reset(mock);
 
-        mService.verifyCredential(newPin("0000"), PRIMARY_USER_ID, 0);
+        mService.verifyCredential(newPin("000000"), PRIMARY_USER_ID, 0);
         verify(mock).onVerifyCredentialResult(argThat(r -> !r.isMatched()), any(),
                 eq(PRIMARY_USER_ID));
         mService.verifyCredential(newPin(OWNER), PRIMARY_USER_ID, 0);
@@ -395,7 +395,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
                 eq(PRIMARY_USER_ID));
     }
 
-    private static final String PROTECTED = "2222";
+    private static final String PROTECTED = "222200";
     private static final int SECONDARY_SERIAL = 7;
 
     // a secondary user with a screen lock that manages the alternates
@@ -432,7 +432,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
                 nonePassword(), nonePassword(), PRIMARY_USER_ID));
         // a wrong credential of the authority is refused as before
         assertThrows(SecurityException.class,
-                () -> mHelper.hasRebootCredential(newPin("0000"), SECONDARY_USER_ID));
+                () -> mHelper.hasRebootCredential(newPin("000000"), SECONDARY_USER_ID));
 
         // the alternates still fire at every user's prompt
         enter(newPin(REBOOT), PRIMARY_USER_ID);
@@ -587,7 +587,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
 
         assertThat(dispatch(OWNER, matched).isMatched()).isTrue();
         assertThat(matched[0]).isEqualTo(PRIMARY_USER_ID);
-        assertThat(dispatch("0000", matched).isMatched()).isFalse();
+        assertThat(dispatch("000000", matched).isMatched()).isFalse();
         verify(mock).onVerifyCredentialResult(argThat(r -> !r.isMatched()), any(),
                 eq(PRIMARY_USER_ID));
     }
@@ -622,7 +622,7 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         DuressPasswordHelper mock = protectedLayout();
         int[] matched = {-1};
 
-        assertThat(dispatch("0000", matched).isMatched()).isFalse();
+        assertThat(dispatch("000000", matched).isMatched()).isFalse();
         assertThat(matched[0]).isEqualTo(PRIMARY_USER_ID);
         verify(mock).onVerifyCredentialResult(argThat(r -> !r.isMatched()), any(),
                 eq(PRIMARY_USER_ID));
@@ -636,12 +636,12 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         for (int i = 0; i < 5; i++) {
             mService.verifyCredential(newPin("000" + i), PRIMARY_USER_ID, 0);
         }
-        assertThat(mService.verifyCredential(newPin("0009"), PRIMARY_USER_ID, 0)
+        assertThat(mService.verifyCredential(newPin("000900"), PRIMARY_USER_ID, 0)
                 .getTimeoutAsDuration().isPositive()).isTrue();
         int[] matched = {-1};
 
         // a wrong entry reports the protected user's shorter lockout, so the pad stays usable
-        assertThat(dispatch("0008", matched).getTimeoutAsDuration()).isEqualTo(Duration.ZERO);
+        assertThat(dispatch("000800", matched).getTimeoutAsDuration()).isEqualTo(Duration.ZERO);
         assertThat(dispatch(PROTECTED, matched).isMatched()).isTrue();
         assertThat(matched[0]).isEqualTo(SECONDARY_USER_ID);
     }
@@ -652,5 +652,38 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
         // check itself needs the keyguard permission
         int[] matched = {-1};
         assertThat(mService.dispatchCredential(newPin(OWNER), matched).isMatched()).isTrue();
+    }
+
+    // a protected space as lock_settings sees it: B is the authority, the length is stored
+    private void protectedSpaceWithLength(int length) {
+        when(mService.duressPasswordHelper.getAuthorityUserId()).thenReturn(SECONDARY_USER_ID);
+        mStorage.setInt(LockSettingsService.LAYOUT_PIN_LENGTH_KEY, length, PRIMARY_USER_ID);
+    }
+
+    @Test
+    public void layout_everyPinKeepsTheStoredLength() {
+        protectedSpaceWithLength(OWNER.length());
+        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                newPin("12345678"), newPin(OWNER), PRIMARY_USER_ID));
+        assertTrue(mService.setLockCredential(newPin("123456"), newPin(OWNER), PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void layout_ownerKeepsAPin() {
+        protectedSpaceWithLength(OWNER.length());
+        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                nonePassword(), newPin(OWNER), PRIMARY_USER_ID));
+        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
+                newPassword("abcdef"), newPin(OWNER), PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void layout_noRulesWithoutAProtectedSpace() {
+        mStorage.setInt(LockSettingsService.LAYOUT_PIN_LENGTH_KEY, OWNER.length(),
+                PRIMARY_USER_ID);
+        assertTrue(mService.setLockCredential(newPin("12345678"), newPin(OWNER),
+                PRIMARY_USER_ID));
+        assertTrue(mService.setLockCredential(nonePassword(), newPin("12345678"),
+                PRIMARY_USER_ID));
     }
 }

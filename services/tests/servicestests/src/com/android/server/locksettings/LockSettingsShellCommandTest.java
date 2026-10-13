@@ -126,10 +126,10 @@ public class LockSettingsShellCommandTest {
         when(mLockPatternUtils.getRequestedPasswordMetrics(mUserId))
                 .thenReturn(metricsForAdminQuality(PASSWORD_QUALITY_NUMERIC));
         assertEquals(0, mCommand.exec(new Binder(), in, out, err,
-                new String[] { "set-pin", "--old", "1234", "4321" },
+                new String[] { "set-pin", "--old", "1234", "432165" },
                 mShellCallback, mResultReceiver));
         verify(mLockPatternUtils).setLockCredential(
-                LockscreenCredential.createPin("4321"),
+                LockscreenCredential.createPin("432165"),
                 LockscreenCredential.createPin("1234"),
                 mUserId);
     }
@@ -324,11 +324,11 @@ public class LockSettingsShellCommandTest {
                 .thenReturn(PASSWORD_COMPLEXITY_MEDIUM);
 
         assertEquals(0, mCommand.exec(new Binder(), in, out, err,
-                new String[] { "set-pin", "--old", "1234", "4231" },
+                new String[] { "set-pin", "--old", "1234", "423165" },
                 mShellCallback, mResultReceiver));
 
         verify(mLockPatternUtils).setLockCredential(
-                LockscreenCredential.createPin("4231"),
+                LockscreenCredential.createPin("423165"),
                 LockscreenCredential.createPin("1234"),
                 mUserId);
     }
