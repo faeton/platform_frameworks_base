@@ -4819,6 +4819,16 @@ public class LockSettingsService extends ILockSettings.Stub {
             AuthenticationResult result = mSpManager.unlockLskfBasedProtector(
                     getGateKeeperService(), protectorId, credential, Primary, userId, null);
             try {
+                // the protector only opens for the right PIN, even if a later Gatekeeper step
+                // then fails
+                if (result.syntheticPassword != null) {
+                    reportResultToSoftwareRateLimiter(VerifyCredentialResponse.OK, lskfId,
+                            credential);
+                    return true;
+                }
+                if (result.response == null) {
+                    throw new IllegalStateException("can't compare the PIN now, try later");
+                }
                 VerifyCredentialResponse response =
                         reportResultToSoftwareRateLimiter(result.response, lskfId, credential);
                 if (response.isMatched()) {
