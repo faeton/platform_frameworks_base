@@ -111,6 +111,8 @@ static const char EXIT_PROP_NAME[] = "service.bootanim.exit";
 static const char PROGRESS_PROP_NAME[] = "service.bootanim.progress";
 static const char CLOCK_ENABLED_PROP_NAME[] = "persist.sys.bootanim.clock.enabled";
 static const char DECODE_RGB565_PROP_NAME[] = "persist.sys.bootanim.decode.rgb565";
+// set by system_server once the owner's first setup is done
+static const char SETUP_DONE_PROP_NAME[] = "persist.sys.bootanim.setup_done";
 static const int ANIM_ENTRY_NAME_MAX = ANIM_PATH_MAX + 1;
 static const int MAX_CHECK_EXIT_INTERVAL_US = 50000;
 static constexpr size_t TEXT_POS_LEN_MAX = 16;
@@ -790,7 +792,10 @@ bool BootAnimation::android(const Display& display) {
 
     SLOGD("%sAnimationShownTiming start time: %" PRId64 "ms", mShuttingDown ? "Shutdown" : "Boot",
             elapsedRealtime());
-    initTexture(&mAndroid[0], mAssets, "images/android-logo-mask.png");
+    // our logo until the first setup is done, the plain Android one after
+    initTexture(&mAndroid[0], mAssets,
+            android::base::GetBoolProperty(SETUP_DONE_PROP_NAME, false)
+                    ? "images/android-logo-mask.png" : "images/setup-logo-mask.png");
     initTexture(&mAndroid[1], mAssets, "images/android-logo-shine.png");
 
     mCallbacks->init({});

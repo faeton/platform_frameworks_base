@@ -3547,6 +3547,8 @@ public final class SystemServer implements Dumpable {
             mSystemServiceManager.startBootPhase(t, SystemService.PHASE_THIRD_PARTY_APPS_CAN_START);
             t.traceEnd();
 
+            BootLogoSetupFlag.start(context, FgThread.getHandler());
+
             if (hsumBootUserInitializer != null) {
                 t.traceBegin("HsumBootUserInitializer.systemRunning");
                 hsumBootUserInitializer.systemRunning(t);
