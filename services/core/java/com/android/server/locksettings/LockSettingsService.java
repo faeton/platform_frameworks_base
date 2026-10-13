@@ -4828,6 +4828,11 @@ public class LockSettingsService extends ILockSettings.Stub {
             mStorageManager.lockCeStorage(user.id);
             mUserManager.setUserRestriction(UserManager.DISALLOW_REMOVE_USER, true,
                     UserHandle.SYSTEM);
+            // no Android private space beside it, in either user
+            mUserManager.setUserRestriction(UserManager.DISALLOW_ADD_PRIVATE_PROFILE, true,
+                    UserHandle.SYSTEM);
+            mUserManager.setUserRestriction(UserManager.DISALLOW_ADD_PRIVATE_PROFILE, true,
+                    user.getUserHandle());
             // no user switcher anywhere (switching itself doesn't check this), and the
             // protected user may be opened first after a reboot
             Settings.Global.putInt(mContext.getContentResolver(),
@@ -4858,6 +4863,8 @@ public class LockSettingsService extends ILockSettings.Stub {
             Slog.e(TAG, "couldn't hand the alternates back to user 0", e);
         }
         mUserManager.setUserRestriction(UserManager.DISALLOW_REMOVE_USER, false,
+                UserHandle.SYSTEM);
+        mUserManager.setUserRestriction(UserManager.DISALLOW_ADD_PRIVATE_PROFILE, false,
                 UserHandle.SYSTEM);
         Settings.Global.putInt(mContext.getContentResolver(),
                 Settings.Global.USER_SWITCHER_ENABLED, 1);
