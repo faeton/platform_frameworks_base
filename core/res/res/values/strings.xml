@@ -7362,4 +7362,6 @@
     <string name="do_not_disturb_sync_notification_title">Do not disturb</string>
     <!-- Notification content for Do not disturb sync [CHAR LIMIT=NONE] -->
     <string name="do_not_disturb_sync_notification_content">Synced from your nearby device</string>
+    <!-- Name of the bundled web browser on the owner's home screen [CHAR LIMIT=20] -->
+    <string name="browser_app_label">Browser</string>
 </resources>

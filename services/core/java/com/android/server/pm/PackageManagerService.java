@@ -4092,6 +4092,35 @@ public class PackageManagerService implements PackageSender, TestUtilityService 
         }
     }
 
+    /**
+     * Shows a system app's component under another label for one user, without the caller
+     * checks of {@link #updateComponentLabelIcon}; only for system_server's own use.
+     */
+    public void overrideSystemComponentLabel(ComponentName componentName, String label,
+            int userId) {
+        final String pkgName = componentName.getPackageName();
+        final Computer computer = snapshotComputer();
+        final PackageStateInternal packageState = computer.getPackageStateInternal(pkgName);
+        if (packageState == null || packageState.getPkg() == null || !packageState.isSystem()
+                || !computer.getComponentResolver().componentExists(componentName)) {
+            return;
+        }
+        final Pair<String, Integer> existing = packageState.getUserStateOrDefault(userId)
+                .getOverrideLabelIconForComponent(componentName);
+        if (existing != null && TextUtils.equals(existing.first, label)) {
+            return;
+        }
+        commitPackageStateMutation(null, pkgName, state -> state.userState(userId)
+                .setComponentLabelIcon(componentName, label, null));
+        mPendingBroadcasts.addComponent(userId, pkgName, componentName.getClassName());
+        if (!mHandler.hasMessages(SEND_PENDING_BROADCAST)) {
+            mHandler.sendMessageDelayed(mHandler.obtainMessage(SEND_PENDING_BROADCAST,
+                    Process.SYSTEM_UID, 0, PackageMetrics.STRING_COMPONENT_LABEL_ICON_CHANGED),
+                    BROADCAST_DELAY);
+        }
+        scheduleWritePackageRestrictions(userId);
+    }
+
     private void buildRequiredSystemPackages() {
         mRequiredSystemPackages.addAll(mInjector.getSystemConfig().getPreventUserDisablePackages());
         mRequiredSystemPackages.add(mRequiredInstallerPackage);

@@ -3548,6 +3548,12 @@ public final class SystemServer implements Dumpable {
             t.traceEnd();
 
             BootLogoSetupFlag.start(context, FgThread.getHandler());
+            // the owner's space shows the bundled browser under a plain name
+            mPackageManagerService.overrideSystemComponentLabel(
+                    new ComponentName("app.vanadium.browser",
+                            "com.google.android.apps.chrome.Main"),
+                    context.getString(com.android.internal.R.string.browser_app_label),
+                    UserHandle.USER_SYSTEM);
 
             if (hsumBootUserInitializer != null) {
                 t.traceBegin("HsumBootUserInitializer.systemRunning");
