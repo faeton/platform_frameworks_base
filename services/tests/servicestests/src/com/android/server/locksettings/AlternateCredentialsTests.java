@@ -6,6 +6,7 @@ import static com.android.internal.widget.LockPatternUtils.CREDENTIAL_TYPE_NONE;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -713,10 +714,15 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     @Test
     public void layout_onlyTheProtectedUserIsRefusedAnAlternate() {
         mService.initializeSyntheticPassword(SECONDARY_USER_ID);
+        assertTrue(mService.setLockCredential(newPin(PROTECTED), nonePassword(),
+                SECONDARY_USER_ID));
         protectedSpaceWithLength(OWNER.length());
         when(mService.duressPasswordHelper.isAlternateCredential(any())).thenReturn(true);
+        // a wrong current PIN fails before the comparison, so it can't test guesses
+        assertFalse(mService.setLockCredential(newPin(DURESS_PIN), newPin("000000"),
+                SECONDARY_USER_ID));
         var e = assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
-                newPin(DURESS_PIN), nonePassword(), SECONDARY_USER_ID));
+                newPin(DURESS_PIN), newPin(PROTECTED), SECONDARY_USER_ID));
         assertThat(e).hasMessageThat().startsWith("collision:");
         assertTrue(mService.setLockCredential(newPin(DURESS_PIN), newPin(OWNER),
                 PRIMARY_USER_ID));

@@ -2213,7 +2213,6 @@ public class LockSettingsService extends ILockSettings.Stub {
         try {
             credential.validateBasicRequirements();
             checkLayoutCredential(credential, lockDomain, userId);
-            checkLayoutCollision(credential, lockDomain, userId);
 
             enforceFrpNotActive();
             // When changing credential for profiles with unified challenge, some callers
@@ -2359,6 +2358,9 @@ public class LockSettingsService extends ILockSettings.Stub {
                     }
                     return false;
                 }
+                // only once the saved credential matched: before that a refusal would test
+                // guesses for whoever can call this
+                checkLayoutCollision(credential, lockDomain, userId);
 
                 if (lockDomain == Primary) {
                     onSyntheticPasswordUnlocked(userId, sp);
@@ -3963,7 +3965,6 @@ public class LockSettingsService extends ILockSettings.Stub {
         boolean result;
         credential.validateBasicRequirements();
         checkLayoutCredential(credential, Primary, userId);
-        checkLayoutCollision(credential, Primary, userId);
         synchronized (mSpManager) {
             if (!mSpManager.hasEscrowData(userId)) {
                 throw new SecurityException("Escrow token is disabled on the current user");
@@ -4012,6 +4013,7 @@ public class LockSettingsService extends ILockSettings.Stub {
                     + "verification.");
             return false;
         }
+        checkLayoutCollision(credential, Primary, userId);
         onSyntheticPasswordUnlocked(userId, result.syntheticPassword);
         setLockCredentialWithSpLocked(credential, Primary, result.syntheticPassword, userId);
         return true;
