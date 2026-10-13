@@ -2321,6 +2321,17 @@ public class LockPatternUtils {
         return getAlternatesAuthority() == mContext.getUserId();
     }
 
+    /**
+     * The number of digits every PIN must have once a protected space exists, or 0 without one.
+     */
+    public int getLayoutPinLength() {
+        try {
+            return getLockSettings().getLayoutPinLength();
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
     public void setAlternatesAuthority(int userId) {
         try {
             getLockSettings().setAlternatesAuthority(userId);

@@ -50,7 +50,8 @@ public class DuressPasswordHelper {
 
     /** Records only this class may read or write, never through the generic key calls. */
     static final Set<String> RESERVED_KEYS = Set.of(AUTHORITY_KEY, AUTHORITY_SERIAL_KEY,
-            DuressCredentials.LOCK_SETTINGS_STORAGE_KEY, RebootCredential.LOCK_SETTINGS_STORAGE_KEY);
+            DuressCredentials.LOCK_SETTINGS_STORAGE_KEY, RebootCredential.LOCK_SETTINGS_STORAGE_KEY,
+            LockSettingsService.LAYOUT_PIN_LENGTH_KEY);
 
     // successful verifications per user, a queued reboot is dropped when this changes
     @GuardedBy("verifiedCount")
@@ -338,6 +339,7 @@ public class DuressPasswordHelper {
 
         DuressCredential.validate(pin, CREDENTIAL_TYPE_PIN);
         DuressCredential.validate(password, CREDENTIAL_TYPE_PASSWORD);
+        lockSettingsService.checkLayoutPinLength(pin);
 
         synchronized (alternatesLock) {
             checkUnchangedLocked(userId, changesBefore);
@@ -429,6 +431,7 @@ public class DuressPasswordHelper {
             throw new IllegalArgumentException("unsupported credential type " + type);
         }
         DuressCredential.validate(credential, type);
+        lockSettingsService.checkLayoutPinLength(credential);
 
         if (sameAsOwner) {
             throw new IllegalArgumentException(COLLISION_OWNER);

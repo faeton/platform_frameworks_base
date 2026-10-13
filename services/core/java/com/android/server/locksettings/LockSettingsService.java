@@ -195,6 +195,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
@@ -2211,7 +2212,7 @@ public class LockSettingsService extends ILockSettings.Stub {
         final long identity = Binder.clearCallingIdentity();
         try {
             credential.validateBasicRequirements();
-            checkLayoutPinLength(credential);
+            checkLayoutCredential(credential, lockDomain, userId);
 
             enforceFrpNotActive();
             // When changing credential for profiles with unified challenge, some callers
@@ -2295,6 +2296,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             boolean isLockTiedToParent) {
         Objects.requireNonNull(credential);
         Objects.requireNonNull(savedCredential);
+        noteOwnerChange(userId);
         duressPasswordHelper.onLockCredentialChanging(userId);
         if (lockDomain == Secondary && !(credential.getType() == CREDENTIAL_TYPE_PIN ||
                 credential.getType() == CREDENTIAL_TYPE_NONE)) {
@@ -2388,6 +2390,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             }
         }
         updatePasswordHistory(newCredential, userId, lockDomain);
+        noteOwnerChange(userId);
         duressPasswordHelper.onLockCredentialChanged(newCredential, lockDomain, userId);
         if (lockDomain == Primary) {
             mContext.getSystemService(TrustManager.class).reportEnabledTrustAgentsChanged(
@@ -3958,7 +3961,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             byte[] token, int userId) {
         boolean result;
         credential.validateBasicRequirements();
-        checkLayoutPinLength(credential);
+        checkLayoutCredential(credential, Primary, userId);
         synchronized (mSpManager) {
             if (!mSpManager.hasEscrowData(userId)) {
                 throw new SecurityException("Escrow token is disabled on the current user");
@@ -3989,6 +3992,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     @GuardedBy("mSpManager")
     private boolean setLockCredentialWithTokenInternalLocked(LockscreenCredential credential,
             long tokenHandle, byte[] token, int userId) {
+        noteOwnerChange(userId);
         duressPasswordHelper.onLockCredentialChanging(userId);
         Slogf.i(TAG, "Resetting lockscreen credential of user %d using escrow token %016x",
                 userId, tokenHandle);
@@ -4716,15 +4720,56 @@ public class LockSettingsService extends ILockSettings.Stub {
         }
     }
 
-    // With a protected space every new PIN, of any user, has 6 digits or more; callers that
-    // skip PasswordMetrics validation are refused here.
-    private void checkLayoutPinLength(LockscreenCredential credential) {
-        if (credential != null && credential.isPin()
-                && credential.size() < LockPatternUtils.MIN_NEW_PIN_SIZE
-                && duressPasswordHelper.getAuthorityUserId() != UserHandle.USER_SYSTEM) {
+    static final String LAYOUT_PIN_LENGTH_KEY = "protected_space_pin_length";
+
+    // changes of user 0's credentials, started or finished; provisioning fails if one overlaps
+    private final AtomicInteger mOwnerChanges = new AtomicInteger();
+
+    private void noteOwnerChange(int userId) {
+        if (userId == UserHandle.USER_SYSTEM) {
+            mOwnerChanges.incrementAndGet();
+        }
+    }
+
+    // With a protected space, user 0 and the protected user keep a PIN: dispatch from user 0's
+    // PIN pad is the only way into B, so neither may switch to no lock or a password (doc 04,
+    // decision 2026-10-11). A cleared second factor stays allowed.
+    private void checkLayoutCredential(LockscreenCredential credential, LockDomain lockDomain,
+            int userId) {
+        final int authority = duressPasswordHelper.getAuthorityUserId();
+        if (authority != UserHandle.USER_SYSTEM && lockDomain == Primary
+                && (userId == UserHandle.USER_SYSTEM || userId == authority)
+                && !credential.isPin()) {
+            throw new IllegalArgumentException("the screen lock must stay a PIN");
+        }
+        checkLayoutPinLength(credential);
+    }
+
+    // With a protected space every new PIN, of any user and of the alternates, has the owner's
+    // length from setup, so auto-confirm works for all of them (doc 04 decision 2026-10-13).
+    // Spaces set up before the length was stored only keep the 6-digit minimum.
+    void checkLayoutPinLength(LockscreenCredential credential) {
+        if (credential == null || !credential.isPin()
+                || duressPasswordHelper.getAuthorityUserId() == UserHandle.USER_SYSTEM) {
+            return;
+        }
+        final int length = mStorage.getInt(LAYOUT_PIN_LENGTH_KEY, 0, UserHandle.USER_SYSTEM);
+        if (length > 0 && credential.size() != length) {
+            throw new IllegalArgumentException("PIN must have " + length + " digits");
+        }
+        if (credential.size() < LockPatternUtils.MIN_NEW_PIN_SIZE) {
             throw new IllegalArgumentException("PIN must be at least "
                     + LockPatternUtils.MIN_NEW_PIN_SIZE + " digits long");
         }
+    }
+
+    @Override
+    public int getLayoutPinLength() {
+        checkHavePermission();
+        if (duressPasswordHelper.getAuthorityUserId() == UserHandle.USER_SYSTEM) {
+            return 0;
+        }
+        return mStorage.getInt(LAYOUT_PIN_LENGTH_KEY, 0, UserHandle.USER_SYSTEM);
     }
 
     // every PIN of the layout: digits only, 6 or more (doc 00 decision 2026-10-11)
@@ -4758,6 +4803,11 @@ public class LockSettingsService extends ILockSettings.Stub {
         }
         // the helper checks the alternates against the protected PIN and each other; the
         // owner's PIN is checked here, a match there would never reach the alternates
+        if (protectedPin.size() != owner.size()
+                || (withDuress && duressPin.size() != owner.size())
+                || (withReboot && reboot.size() != owner.size())) {
+            throw new IllegalArgumentException("every PIN must have " + owner.size() + " digits");
+        }
         if (protectedPin.equals(owner)) {
             throw new IllegalArgumentException("protected PIN equals the owner's");
         }
@@ -4768,14 +4818,24 @@ public class LockSettingsService extends ILockSettings.Stub {
             if (duressPasswordHelper.getAuthorityUserId() != UserHandle.USER_SYSTEM) {
                 throw new IllegalStateException("protected space already set up");
             }
+            for (UserInfo profile : mUserManager.getProfiles(UserHandle.USER_SYSTEM)) {
+                if (profile.isPrivateProfile()) {
+                    throw new IllegalStateException("remove the private space first");
+                }
+            }
+            final int ownerChanges = mOwnerChanges.get();
             try (LockscreenCredential o = owner.duplicate()) {
                 if (!doVerifyCredential(o, Primary, UserHandle.USER_SYSTEM, null, 0)
                         .isMatched()) {
                     throw new SecurityException("owner credential didn't match");
                 }
             }
+            // stored before the protected user becomes the authority, so the rule holds from
+            // the moment the layout exists; ignored while user 0 is the authority
+            mStorage.setInt(LAYOUT_PIN_LENGTH_KEY, owner.size(), UserHandle.USER_SYSTEM);
             return createProtectedSpaceLocked(protectedPin, withDuress ? duressPin : null,
-                    withDuress ? duressPassword : null, withReboot ? reboot : null);
+                    withDuress ? duressPassword : null, withReboot ? reboot : null,
+                    ownerChanges);
         }
     }
 
@@ -4783,7 +4843,7 @@ public class LockSettingsService extends ILockSettings.Stub {
     private int createProtectedSpaceLocked(LockscreenCredential protectedPin,
             @Nullable LockscreenCredential duressPin,
             @Nullable LockscreenCredential duressPassword,
-            @Nullable LockscreenCredential reboot) {
+            @Nullable LockscreenCredential reboot, int ownerChanges) {
         UserInfo user = mUserManager.createUser("Protected",
                 UserManager.USER_TYPE_FULL_SECONDARY, 0);
         if (user == null) {
@@ -4839,6 +4899,10 @@ public class LockSettingsService extends ILockSettings.Stub {
                     Settings.Global.USER_SWITCHER_ENABLED, 0);
             Settings.Global.putInt(mContext.getContentResolver(),
                     Settings.Global.ALLOW_USER_SWITCHING_WHEN_SYSTEM_USER_LOCKED, 1);
+            // a change of user 0's PIN during setup could have left it at another length
+            if (mOwnerChanges.get() != ownerChanges) {
+                throw new IllegalStateException("owner credential changed during setup");
+            }
             done = true;
             Slog.i(TAG, "protected space set up as user " + user.id);
             return user.id;
