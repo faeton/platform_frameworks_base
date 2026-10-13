@@ -4794,6 +4794,9 @@ public class LockSettingsService extends ILockSettings.Stub {
         try (LockscreenCredential none = LockscreenCredential.createNone()) {
             mUserManager.setUserRestriction(UserManager.DISALLOW_RUN_IN_BACKGROUND, true,
                     user.getUserHandle());
+            // secondary users can't call by default; the protected space is used like the owner's
+            mUserManager.setUserRestriction(UserManager.DISALLOW_OUTGOING_CALLS, false,
+                    user.getUserHandle());
             // a red accent marks the protected space; its user can pick other colors there
             Settings.Secure.putStringForUser(mContext.getContentResolver(),
                     Settings.Secure.THEME_CUSTOMIZATION_OVERLAY_PACKAGES,
