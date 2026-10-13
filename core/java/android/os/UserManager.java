@@ -3525,6 +3525,10 @@ public class UserManager {
             Manifest.permission.QUERY_USERS})
     @UserHandleAware
     public boolean canAddPrivateProfile() {
+        // the protected space sets this; Settings hides the entry instead of failing late
+        if (hasUserRestriction(UserManager.DISALLOW_ADD_PRIVATE_PROFILE)) {
+            return false;
+        }
         if (android.multiuser.Flags.blockPrivateSpaceCreation()) {
             return canAddMoreProfilesToUser(USER_TYPE_PROFILE_PRIVATE, mUserId)
                     && !hasUserRestriction(UserManager.DISALLOW_ADD_PRIVATE_PROFILE);
