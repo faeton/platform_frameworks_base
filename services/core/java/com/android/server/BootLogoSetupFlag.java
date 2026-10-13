@@ -14,7 +14,7 @@ import android.provider.Settings;
  * and the plain Android one after.
  */
 public final class BootLogoSetupFlag {
-    private static final String PROP = "persist.sys.bootanim.setup_done";
+    private static final String PROP = "persist.bootanim.setup_done";
 
     private BootLogoSetupFlag() {}
 
