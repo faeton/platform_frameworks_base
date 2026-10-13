@@ -49,6 +49,7 @@ import android.content.pm.UsesPermissionPurposeInfo;
 import android.content.pm.ValidGeneralPurposeInfo;
 import android.content.pm.ValidPurposeInfo;
 import android.content.pm.overlay.OverlayPaths;
+import android.content.res.Resources;
 import android.os.Environment;
 import android.os.PatternMatcher;
 import android.os.Process;
@@ -108,6 +109,9 @@ import java.util.Set;
  **/
 public class PackageInfoUtils {
     private static final String TAG = ParsingUtils.TAG;
+
+    /** The bundled browser, shown as "Browser" in user 0. */
+    public static final String OWNER_BROWSER_PACKAGE = "app.vanadium.browser";
 
     private static final String SYSTEM_DATA_PATH =
             Environment.getDataDirectoryPath() + File.separator + "system";
@@ -464,6 +468,10 @@ public class PackageInfoUtils {
         ai.isArchived = PackageArchiver.isArchived(state);
         if (ai.isArchived) {
             ai.nonLocalizedLabel = state.getArchiveState().getActivityInfos().get(0).getTitle();
+        }
+        if (userId == UserHandle.USER_SYSTEM && OWNER_BROWSER_PACKAGE.equals(ai.packageName)) {
+            ai.nonLocalizedLabel = Resources.getSystem().getString(
+                    com.android.internal.R.string.browser_app_label);
         }
         if (!state.isInstalled() && !state.dataExists()) {
             // The data dir has been deleted

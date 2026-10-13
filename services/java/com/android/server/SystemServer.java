@@ -242,6 +242,7 @@ import com.android.server.pm.dex.OdsignStatsLogger;
 import com.android.server.pm.ext.GmsCompatPkgParsingHooks;
 import com.android.server.pm.ext.PackageExtInit;
 import com.android.server.pm.ext.PackageHooksRegistry;
+import com.android.server.pm.parsing.PackageInfoUtils;
 import com.android.server.pm.permission.PermissionMigrationHelper;
 import com.android.server.pm.permission.PermissionMigrationHelperImpl;
 import com.android.server.pm.verify.domain.DomainVerificationService;
@@ -3550,7 +3551,7 @@ public final class SystemServer implements Dumpable {
             BootLogoSetupFlag.start(context, FgThread.getHandler());
             // the owner's space shows the bundled browser under a plain name
             mPackageManagerService.overrideSystemComponentLabel(
-                    new ComponentName("app.vanadium.browser",
+                    new ComponentName(PackageInfoUtils.OWNER_BROWSER_PACKAGE,
                             "com.google.android.apps.chrome.Main"),
                     context.getString(com.android.internal.R.string.browser_app_label),
                     UserHandle.USER_SYSTEM);
