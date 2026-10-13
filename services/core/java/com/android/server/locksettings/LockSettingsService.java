@@ -2360,7 +2360,12 @@ public class LockSettingsService extends ILockSettings.Stub {
                 }
                 // only once the saved credential matched: before that a refusal would test
                 // guesses for whoever can call this
-                checkLayoutCollision(credential, lockDomain, userId);
+                try {
+                    checkLayoutCollision(credential, lockDomain, userId);
+                } catch (RuntimeException e) {
+                    sp.zeroize();
+                    throw e;
+                }
 
                 if (lockDomain == Primary) {
                     onSyntheticPasswordUnlocked(userId, sp);
@@ -4013,7 +4018,12 @@ public class LockSettingsService extends ILockSettings.Stub {
                     + "verification.");
             return false;
         }
-        checkLayoutCollision(credential, Primary, userId);
+        try {
+            checkLayoutCollision(credential, Primary, userId);
+        } catch (RuntimeException e) {
+            result.syntheticPassword.zeroize();
+            throw e;
+        }
         onSyntheticPasswordUnlocked(userId, result.syntheticPassword);
         setLockCredentialWithSpLocked(credential, Primary, result.syntheticPassword, userId);
         return true;
