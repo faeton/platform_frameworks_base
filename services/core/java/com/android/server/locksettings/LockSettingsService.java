@@ -3963,6 +3963,7 @@ public class LockSettingsService extends ILockSettings.Stub {
         boolean result;
         credential.validateBasicRequirements();
         checkLayoutCredential(credential, Primary, userId);
+        checkLayoutCollision(credential, Primary, userId);
         synchronized (mSpManager) {
             if (!mSpManager.hasEscrowData(userId)) {
                 throw new SecurityException("Escrow token is disabled on the current user");
@@ -4767,20 +4768,33 @@ public class LockSettingsService extends ILockSettings.Stub {
         }
     }
 
-    // Checks a credential without unlocking anything. A user in lockout counts as no match.
+    // Checks a credential without unlocking storage. Only a known wrong guess counts as no
+    // match: while the other user is rate-limited the change is refused, so it can't slip in.
     private boolean matchesPrimaryCredential(LockscreenCredential credential, int userId) {
         synchronized (mSpManager) {
             final long protectorId = getCurrentLskfBasedProtectorId(userId, Primary);
             final LskfIdentifier lskfId = new LskfIdentifier(userId, protectorId);
-            if (mSoftwareRateLimiter.apply(lskfId, credential).code
-                    != SoftwareRateLimiterResult.CONTINUE_TO_HARDWARE) {
-                return false;
+            switch (mSoftwareRateLimiter.apply(lskfId, credential).code) {
+                case SoftwareRateLimiterResult.CONTINUE_TO_HARDWARE:
+                    break;
+                case SoftwareRateLimiterResult.DUPLICATE_WRONG_GUESS:
+                case SoftwareRateLimiterResult.CREDENTIAL_TOO_SHORT:
+                    return false;
+                default:
+                    throw new IllegalStateException("can't compare the PIN now, try later");
             }
             AuthenticationResult result = mSpManager.unlockLskfBasedProtector(
                     getGateKeeperService(), protectorId, credential, Primary, userId, null);
             try {
-                return reportResultToSoftwareRateLimiter(result.response, lskfId, credential)
-                        .isMatched();
+                VerifyCredentialResponse response =
+                        reportResultToSoftwareRateLimiter(result.response, lskfId, credential);
+                if (response.isMatched()) {
+                    return true;
+                }
+                if (!response.isCredCertainlyIncorrect()) {
+                    throw new IllegalStateException("can't compare the PIN now, try later");
+                }
+                return false;
             } finally {
                 if (result.syntheticPassword != null) {
                     result.syntheticPassword.zeroize();
