@@ -4529,10 +4529,14 @@ public class LockSettingsService extends ILockSettings.Stub {
         try {
             checkWritePermission();
             checkCallerIsUser(userId);
+            // the caller is checked; the helper reads user properties as the system
+            final long identity = Binder.clearCallingIdentity();
             try {
                 duressPasswordHelper.setDuressCredentials(ownerCredential, pin, password, userId);
             } catch (Throwable e) {
                 throw new ParcelableException(e);
+            } finally {
+                Binder.restoreCallingIdentity(identity);
             }
         } finally {
             zeroizeAll(ownerCredential, pin, password);
@@ -4557,11 +4561,15 @@ public class LockSettingsService extends ILockSettings.Stub {
         try {
             checkWritePermission();
             checkCallerIsUser(userId);
+            // the caller is checked; the helper reads user properties as the system
+            final long identity = Binder.clearCallingIdentity();
             try {
                 duressPasswordHelper.setRebootCredential(ownerCredential, ownerSecondFactor,
                         rebootCredential, userId);
             } catch (Throwable e) {
                 throw new ParcelableException(e);
+            } finally {
+                Binder.restoreCallingIdentity(identity);
             }
         } finally {
             zeroizeAll(ownerCredential, ownerSecondFactor, rebootCredential);
@@ -4747,23 +4755,24 @@ public class LockSettingsService extends ILockSettings.Stub {
         checkLayoutPinLength(credential);
     }
 
-    // With a protected space, user 0 is checked first at the lock screen, so a PIN that user 0
-    // and the protected user share opens user 0, and an alternate that either of them shares
-    // never runs. Such a change is refused. The check against the other user's PIN goes through
-    // its rate limiters like a lock screen attempt (doc 04 decision 2026-10-13).
+    // With a protected space, user 0 is checked first at the lock screen, so a PIN the
+    // protected user shares with user 0 opens user 0, and an alternate it shares never runs.
+    // The protected user's own changes are refused for that. User 0's are not: the refusal
+    // would tell user 0 whether a guess is the protected PIN or an alternate, without the risk
+    // the lock screen carries of hitting the duress PIN (doc 04 decision 2026-10-13).
     private void checkLayoutCollision(LockscreenCredential credential, LockDomain lockDomain,
             int userId) {
         final int authority = duressPasswordHelper.getAuthorityUserId();
         if (authority == UserHandle.USER_SYSTEM || lockDomain != Primary || !credential.isPin()
-                || (userId != UserHandle.USER_SYSTEM && userId != authority)) {
+                || userId != authority) {
             return;
         }
         // duress and reboot only run after both users failed to match
         if (duressPasswordHelper.isAlternateCredential(credential)) {
             throw new IllegalArgumentException("collision: alternate credential");
         }
-        final int other = userId == UserHandle.USER_SYSTEM ? authority : UserHandle.USER_SYSTEM;
-        if (isUserSecure(other) && matchesPrimaryCredential(credential, other)) {
+        if (isUserSecure(UserHandle.USER_SYSTEM)
+                && matchesPrimaryCredential(credential, UserHandle.USER_SYSTEM)) {
             throw new IllegalArgumentException("collision: other space PIN");
         }
     }

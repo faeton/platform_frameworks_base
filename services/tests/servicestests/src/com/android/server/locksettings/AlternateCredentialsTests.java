@@ -697,29 +697,38 @@ public class AlternateCredentialsTests extends BaseLockSettingsServiceTests {
     }
 
     @Test
-    public void layout_spacesKeepDifferentPins() {
+    public void layout_onlyTheProtectedUserIsRefusedASharedPin() {
         mService.initializeSyntheticPassword(SECONDARY_USER_ID);
         assertTrue(mService.setLockCredential(newPin(PROTECTED), nonePassword(),
                 SECONDARY_USER_ID));
         protectedSpaceWithLength(OWNER.length());
 
         var e = assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
-                newPin(PROTECTED), newPin(OWNER), PRIMARY_USER_ID));
-        assertThat(e).hasMessageThat().startsWith("collision:");
-        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
                 newPin(OWNER), newPin(PROTECTED), SECONDARY_USER_ID));
-        assertTrue(mService.setLockCredential(newPin("333300"), newPin(OWNER), PRIMARY_USER_ID));
+        assertThat(e).hasMessageThat().startsWith("collision:");
+        // user 0's refusal would tell it whether a guess is the protected PIN
+        assertTrue(mService.setLockCredential(newPin(PROTECTED), newPin(OWNER), PRIMARY_USER_ID));
     }
 
     @Test
-    public void layout_ownerCantTakeAnAlternate() {
+    public void layout_onlyTheProtectedUserIsRefusedAnAlternate() {
+        mService.initializeSyntheticPassword(SECONDARY_USER_ID);
         protectedSpaceWithLength(OWNER.length());
         when(mService.duressPasswordHelper.isAlternateCredential(any())).thenReturn(true);
         var e = assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
-                newPin(DURESS_PIN), newPin(OWNER), PRIMARY_USER_ID));
-        assertThat(e).hasMessageThat().startsWith("collision:");
-        assertThrows(IllegalArgumentException.class, () -> mService.setLockCredential(
                 newPin(DURESS_PIN), nonePassword(), SECONDARY_USER_ID));
+        assertThat(e).hasMessageThat().startsWith("collision:");
+        assertTrue(mService.setLockCredential(newPin(DURESS_PIN), newPin(OWNER),
+                PRIMARY_USER_ID));
+    }
+
+    @Test
+    public void duress_differsFromTheAuthoritysOwnPin() {
+        makeSecondaryTheAuthority();
+        var e = assertThrows(IllegalArgumentException.class, () -> mHelper.setDuressCredentials(
+                newPin(PROTECTED), newPin(PROTECTED), newPassword(DURESS_PASSWORD),
+                SECONDARY_USER_ID));
+        assertThat(e).hasMessageThat().isEqualTo(DuressPasswordHelper.COLLISION_OWNER);
     }
 
     @Test

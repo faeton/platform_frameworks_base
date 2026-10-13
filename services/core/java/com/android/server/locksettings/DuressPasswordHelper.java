@@ -325,6 +325,10 @@ public class DuressPasswordHelper {
         Objects.requireNonNull(password, "password");
 
         int changesBefore = checkAuthority(userId);
+        // compare before the owner check, which zeroizes a parceled credential; the owner's
+        // own PIN or password would match first and never reach duress
+        boolean sameAsOwner = (!pin.isNone() && pin.equals(ownerCredential))
+                || (!password.isNone() && password.equals(ownerCredential));
         checkOwnerCredential(ownerCredential, userId);
 
         if (pin.isNone() && password.isNone()) {
@@ -340,6 +344,9 @@ public class DuressPasswordHelper {
         DuressCredential.validate(pin, CREDENTIAL_TYPE_PIN);
         DuressCredential.validate(password, CREDENTIAL_TYPE_PASSWORD);
         lockSettingsService.checkLayoutPinLength(pin);
+        if (sameAsOwner) {
+            throw new IllegalArgumentException(COLLISION_OWNER);
+        }
         lockSettingsService.checkAlternateAgainstOwner(pin);
 
         synchronized (alternatesLock) {
