@@ -10692,7 +10692,7 @@
     <application android:process="system"
                  android:persistent="true"
                  android:hasCode="false"
-                 android:label="GrapheneOS"
+                 android:label="os.ivan.gg"
                  android:allowClearUserData="false"
                  android:backupAgent="com.android.server.backup.SystemBackupAgent"
                  android:killAfterRestore="false"
