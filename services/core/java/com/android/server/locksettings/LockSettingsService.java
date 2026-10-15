@@ -114,6 +114,7 @@ import android.os.UserManager;
 import android.os.storage.IStorageManager;
 import android.os.storage.StorageManager;
 import android.provider.Settings;
+import android.safetycenter.SafetyCenterManager;
 import android.security.AndroidKeyStoreMaintenance;
 import android.security.KeyStoreAuthorization;
 import android.security.keystore.KeyProperties;
@@ -5009,6 +5010,7 @@ public class LockSettingsService extends ILockSettings.Stub {
             }
             done = true;
             Slog.i(TAG, "protected space set up as user " + user.id);
+            refreshPrivateSpaceEntry();
             return user.id;
         } catch (RemoteException e) {
             throw new IllegalStateException("couldn't lock the protected user's storage", e);
@@ -5016,6 +5018,23 @@ public class LockSettingsService extends ILockSettings.Stub {
             if (!done) {
                 rollBackProtectedSpace(user.id);
             }
+        }
+    }
+
+    // Settings publishes user 0's Safety Center entry for Android's private space only at boot,
+    // so without a refresh it stays listed until the next one although it can't be used now.
+    private void refreshPrivateSpaceEntry() {
+        Intent intent = new Intent(SafetyCenterManager.ACTION_REFRESH_SAFETY_SOURCES)
+                .setPackage("com.android.settings")
+                .putExtra(SafetyCenterManager.EXTRA_REFRESH_SAFETY_SOURCE_IDS,
+                        new String[] {"AndroidPrivateSpace"})
+                .putExtra(SafetyCenterManager.EXTRA_REFRESH_SAFETY_SOURCES_BROADCAST_ID,
+                        "protected-space-setup");
+        try {
+            mContext.sendBroadcastAsUser(intent, UserHandle.SYSTEM);
+        } catch (RuntimeException e) {
+            // the setup is done; a stale entry only lasts until the next boot
+            Slog.w(TAG, "couldn't refresh the private space entry", e);
         }
     }
 
