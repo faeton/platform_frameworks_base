@@ -797,10 +797,12 @@ bool BootAnimation::android(const Display& display) {
     // a few seconds (a new device formats /data first) it's our logo.
     android::base::WaitForProperty("ro.persistent_properties.ready", "true",
             std::chrono::seconds(5));
+    // our logo is taller than Android's, so it has its own shine
+    const bool setupDone = android::base::GetBoolProperty(SETUP_DONE_PROP_NAME, false);
     initTexture(&mAndroid[0], mAssets,
-            android::base::GetBoolProperty(SETUP_DONE_PROP_NAME, false)
-                    ? "images/android-logo-mask.png" : "images/setup-logo-mask.png");
-    initTexture(&mAndroid[1], mAssets, "images/android-logo-shine.png");
+            setupDone ? "images/android-logo-mask.png" : "images/setup-logo-mask.png");
+    initTexture(&mAndroid[1], mAssets,
+            setupDone ? "images/android-logo-shine.png" : "images/setup-logo-shine.png");
 
     mCallbacks->init({});
 
